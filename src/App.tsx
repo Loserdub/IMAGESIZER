@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Undo, Redo, Download, Upload, Image as ImageIcon, Move, Maximize, Minimize, ArrowUpDown, ArrowLeftRight, Lasso, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Sparkles, Undo, Redo, Download, Upload, Image as ImageIcon, Move, Maximize, Minimize, ArrowUpDown, ArrowLeftRight, Lasso, PanelLeftClose, PanelLeftOpen, Hand, ZoomIn, ZoomOut, Plus, Minus } from 'lucide-react';
 
-type ToolMode = 'push' | 'expand' | 'pinch' | 'stretch-v' | 'stretch-h' | 'lasso';
+type ToolMode = 'push' | 'expand' | 'pinch' | 'stretch-v' | 'stretch-h' | 'lasso' | 'pan';
 
 function renderFullImage(uMap: Float32Array, originalData: ImageData, currentData: ImageData) {
   const width = originalData.width;
@@ -270,6 +270,9 @@ export default function App() {
   const [lassoInvert, setLassoInvert] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  
   const lassoPointsRef = useRef<{x: number, y: number}[]>([]);
   const lassoBaseUMapRef = useRef<Float32Array | null>(null);
   const lassoMaskRef = useRef<Uint8ClampedArray | null>(null);
@@ -282,10 +285,14 @@ export default function App() {
   const toolModeRef = useRef<ToolMode>('push');
   const brushSizeRef = useRef(80);
   const brushStrengthRef = useRef(0.5);
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
   
   useEffect(() => { toolModeRef.current = toolMode; }, [toolMode]);
   useEffect(() => { brushSizeRef.current = brushSize; }, [brushSize]);
   useEffect(() => { brushStrengthRef.current = brushStrength; }, [brushStrength]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { panRef.current = pan; }, [pan]);
   
   const undoStackRef = useRef<Float32Array[]>([]);
   const redoStackRef = useRef<Float32Array[]>([]);
@@ -299,9 +306,33 @@ export default function App() {
   const lastPosRef = useRef<{x: number, y: number} | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   
+  const activePointersRef = useRef<Map<number, {x: number, y: number}>>(new Map());
+  const initialPinchRef = useRef<{dist: number, center: {x: number, y: number}, zoom: number, pan: {x: number, y: number}} | null>(null);
+  const lastPanPosRef = useRef<{x: number, y: number} | null>(null);
+  
   const [cursorPos, setCursorPos] = useState<{x: number, y: number} | null>(null);
   const [, setTick] = useState(0);
   const forceUpdate = () => setTick(t => t + 1);
+
+  useEffect(() => {
+    const main = document.getElementById('main-canvas-container');
+    if (!main) return;
+    
+    const handleWheel = (e: WheelEvent) => {
+      if (!imageLoaded) return;
+      e.preventDefault();
+      
+      if (e.ctrlKey || e.metaKey) {
+        const zoomDelta = -e.deltaY * 0.01;
+        setZoom(z => Math.max(0.1, Math.min(10, z + (z * zoomDelta))));
+      } else {
+        setPan(p => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+      }
+    };
+    
+    main.addEventListener('wheel', handleWheel, { passive: false });
+    return () => main.removeEventListener('wheel', handleWheel);
+  }, [imageLoaded]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -522,6 +553,42 @@ export default function App() {
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!imageLoaded) return;
+    
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    
+    if (activePointersRef.current.size === 2) {
+      const pointers = Array.from(activePointersRef.current.values()) as {x: number, y: number}[];
+      const dist = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+      const center = {
+        x: (pointers[0].x + pointers[1].x) / 2,
+        y: (pointers[0].y + pointers[1].y) / 2
+      };
+      initialPinchRef.current = { dist, center, zoom: zoomRef.current, pan: { ...panRef.current } };
+      isDraggingRef.current = false;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      return;
+    }
+    
+    if (activePointersRef.current.size > 2) return;
+
+    if (toolModeRef.current === 'pan' || e.button === 1 || e.button === 2) {
+      lastPanPosRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    
+    if (e.button !== 0) return;
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+      lastPanPosRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
     isDraggingRef.current = true;
     lastPosRef.current = getMousePos(e);
     
@@ -550,6 +617,42 @@ export default function App() {
 
   const handlePointerMove = (e: React.PointerEvent) => {
     setCursorPos({ x: e.clientX, y: e.clientY });
+    
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    
+    if (activePointersRef.current.size === 2 && initialPinchRef.current) {
+      const pointers = Array.from(activePointersRef.current.values()) as {x: number, y: number}[];
+      const dist = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+      const center = {
+        x: (pointers[0].x + pointers[1].x) / 2,
+        y: (pointers[0].y + pointers[1].y) / 2
+      };
+      
+      const scale = dist / initialPinchRef.current.dist;
+      const newZoom = Math.max(0.1, Math.min(10, initialPinchRef.current.zoom * scale));
+      
+      const deltaX = center.x - initialPinchRef.current.center.x;
+      const deltaY = center.y - initialPinchRef.current.center.y;
+      
+      setZoom(newZoom);
+      setPan({
+        x: initialPinchRef.current.pan.x + deltaX,
+        y: initialPinchRef.current.pan.y + deltaY
+      });
+      return;
+    }
+    
+    if (activePointersRef.current.size > 1) return;
+
+    if (lastPanPosRef.current) {
+      const dx = e.clientX - lastPanPosRef.current.x;
+      const dy = e.clientY - lastPanPosRef.current.y;
+      setPan(p => ({ x: p.x + dx, y: p.y + dy }));
+      lastPanPosRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
     
     if (toolModeRef.current === 'lasso') {
       if (isDraggingRef.current && !isLassoClosed) {
@@ -623,7 +726,11 @@ export default function App() {
     lastPosRef.current = currentPos;
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) initialPinchRef.current = null;
+    if (activePointersRef.current.size === 0) lastPanPosRef.current = null;
+    
     if (toolModeRef.current === 'lasso' && !isLassoClosed && isDraggingRef.current) {
       isDraggingRef.current = false;
       if (lassoPointsRef.current.length > 2) {
@@ -661,6 +768,21 @@ export default function App() {
         }
         redoStackRef.current = [];
         forceUpdate();
+      }
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) initialPinchRef.current = null;
+    if (activePointersRef.current.size === 0) lastPanPosRef.current = null;
+    
+    if (isDraggingRef.current) {
+      isDraggingRef.current = false;
+      lastPosRef.current = null;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     }
   };
@@ -728,6 +850,7 @@ export default function App() {
     { id: 'stretch-v', icon: ArrowUpDown, label: 'Stretch Vertically' },
     { id: 'stretch-h', icon: ArrowLeftRight, label: 'Stretch Horizontally' },
     { id: 'lasso', icon: Lasso, label: 'Lasso Scale' },
+    { id: 'pan', icon: Hand, label: 'Pan' },
   ] as const;
 
   return (
@@ -926,18 +1049,28 @@ export default function App() {
         </aside>
 
         <main 
+          id="main-canvas-container"
           className="flex-1 relative bg-neutral-950 flex items-center justify-center overflow-hidden p-8"
-          onPointerLeave={() => {
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+          onPointerLeave={(e) => {
             setCursorPos(null);
-            handlePointerUp();
+            handlePointerCancel(e);
           }}
+          onContextMenu={e => e.preventDefault()}
         >
-          <div className={`relative max-w-full max-h-full flex items-center justify-center ${!imageLoaded ? 'hidden' : ''}`}>
+          <div 
+            className={`relative flex items-center justify-center ${!imageLoaded ? 'hidden' : ''}`}
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: 'center',
+              transition: activePointersRef.current.size >= 2 ? 'none' : 'transform 0.1s ease-out'
+            }}
+          >
             <canvas
               ref={canvasRef}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
               className="max-w-full max-h-full object-contain cursor-crosshair shadow-2xl rounded-sm"
               style={{ touchAction: 'none' }}
             />
@@ -945,23 +1078,42 @@ export default function App() {
               ref={overlayCanvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none object-contain"
             />
-            {cursorPos && !isDraggingRef.current && imageLoaded && toolMode !== 'lasso' && (
-              <div 
-                className="fixed pointer-events-none border border-white/50 rounded-full bg-white/10 mix-blend-difference z-50"
-                style={{
-                  width: getCssBrushSize(),
-                  height: getCssBrushSize(),
-                  left: cursorPos.x,
-                  top: cursorPos.y,
-                  transform: 'translate(-50%, -50%)'
-                }}
-              />
-            )}
           </div>
+          {cursorPos && !isDraggingRef.current && imageLoaded && toolMode !== 'lasso' && toolMode !== 'pan' && (
+            <div 
+              className="fixed pointer-events-none border border-white/50 rounded-full bg-white/10 mix-blend-difference z-50"
+              style={{
+                width: getCssBrushSize(),
+                height: getCssBrushSize(),
+                left: cursorPos.x,
+                top: cursorPos.y,
+                transform: 'translate(-50%, -50%)'
+              }}
+            />
+          )}
           {!imageLoaded && (
             <div className="text-neutral-600 flex flex-col items-center gap-4">
               <ImageIcon className="w-16 h-16 opacity-20" />
               <p className="text-sm font-medium">Upload an image to start editing</p>
+            </div>
+          )}
+          
+          {imageLoaded && (
+            <div 
+              className="absolute bottom-6 right-6 flex items-center gap-1 bg-neutral-900/90 backdrop-blur border border-neutral-800 p-1.5 rounded-xl z-30 shadow-xl"
+              onPointerDown={e => e.stopPropagation()}
+            >
+              <button onClick={() => setZoom(z => Math.max(0.1, z - 0.1))} className="p-2 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors">
+                <Minus className="w-4 h-4" />
+              </button>
+              <span className="text-xs font-mono w-14 text-center text-neutral-300">{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom(z => Math.min(10, z + 0.1))} className="p-2 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors">
+                <Plus className="w-4 h-4" />
+              </button>
+              <div className="w-px h-5 bg-neutral-700 mx-1" />
+              <button onClick={() => { setZoom(1); setPan({x: 0, y: 0}); }} className="p-2 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors" title="Reset View">
+                <Maximize className="w-4 h-4" />
+              </button>
             </div>
           )}
         </main>
