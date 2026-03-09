@@ -1,0 +1,5 @@
+{
+  "name": "Liquify Image Editor",
+  "description": "A simple image editor to naturally pull and warp images without distorting the surrounding area.",
+  "requestFramePermissions": []
+}

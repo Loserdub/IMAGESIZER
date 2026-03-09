@@ -1,0 +1,971 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Sparkles, Undo, Redo, Download, Upload, Image as ImageIcon, Move, Maximize, Minimize, ArrowUpDown, ArrowLeftRight, Lasso, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+
+type ToolMode = 'push' | 'expand' | 'pinch' | 'stretch-v' | 'stretch-h' | 'lasso';
+
+function renderFullImage(uMap: Float32Array, originalData: ImageData, currentData: ImageData) {
+  const width = originalData.width;
+  const height = originalData.height;
+  const src = originalData.data;
+  const dst = currentData.data;
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 2;
+      const origX = uMap[idx];
+      const origY = uMap[idx + 1];
+      
+      const x0 = Math.floor(origX);
+      const x1 = x0 + 1;
+      const y0 = Math.floor(origY);
+      const y1 = y0 + 1;
+      
+      const wx1 = origX - x0;
+      const wx0 = 1 - wx1;
+      const wy1 = origY - y0;
+      const wy0 = 1 - wy1;
+      
+      const safeX0 = Math.max(0, Math.min(width - 1, x0));
+      const safeX1 = Math.max(0, Math.min(width - 1, x1));
+      const safeY0 = Math.max(0, Math.min(height - 1, y0));
+      const safeY1 = Math.max(0, Math.min(height - 1, y1));
+      
+      const idx00 = (safeY0 * width + safeX0) * 4;
+      const idx10 = (safeY0 * width + safeX1) * 4;
+      const idx01 = (safeY1 * width + safeX0) * 4;
+      const idx11 = (safeY1 * width + safeX1) * 4;
+      
+      const dstIdx = (y * width + x) * 4;
+      
+      for (let c = 0; c < 4; c++) {
+        const val00 = src[idx00 + c];
+        const val10 = src[idx10 + c];
+        const val01 = src[idx01 + c];
+        const val11 = src[idx11 + c];
+        
+        const val0 = val00 * wx0 + val10 * wx1;
+        const val1 = val01 * wx0 + val11 * wx1;
+        dst[dstIdx + c] = val0 * wy0 + val1 * wy1;
+      }
+    }
+  }
+}
+
+function applyWarp(
+  uMap: Float32Array,
+  tempUMap: Float32Array,
+  originalData: ImageData,
+  currentData: ImageData,
+  centerX: number,
+  centerY: number,
+  moveX: number,
+  moveY: number,
+  radius: number,
+  strength: number,
+  mode: ToolMode
+) {
+  const width = originalData.width;
+  const height = originalData.height;
+  const r2 = radius * radius;
+  
+  const minX = Math.max(0, Math.floor(centerX - radius));
+  const maxX = Math.min(width - 1, Math.ceil(centerX + radius));
+  const minY = Math.max(0, Math.floor(centerY - radius));
+  const maxY = Math.min(height - 1, Math.ceil(centerY + radius));
+  
+  for (let y = minY; y <= maxY; y++) {
+    const rowStart = (y * width + minX) * 2;
+    const rowEnd = (y * width + maxX + 1) * 2;
+    tempUMap.set(uMap.subarray(rowStart, rowEnd), rowStart);
+  }
+  
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const dist2 = dx * dx + dy * dy;
+      
+      if (dist2 < r2) {
+        const falloff = Math.pow(1 - dist2 / r2, 2);
+        
+        let srcX = x;
+        let srcY = y;
+        
+        if (mode === 'push') {
+          srcX = x - moveX * falloff * strength;
+          srcY = y - moveY * falloff * strength;
+        } else if (mode === 'expand') {
+          srcX = x - dx * falloff * strength * 0.05;
+          srcY = y - dy * falloff * strength * 0.05;
+        } else if (mode === 'pinch') {
+          srcX = x + dx * falloff * strength * 0.05;
+          srcY = y + dy * falloff * strength * 0.05;
+        } else if (mode === 'stretch-v') {
+          srcX = x;
+          srcY = y - dy * falloff * strength * 0.05;
+        } else if (mode === 'stretch-h') {
+          srcX = x - dx * falloff * strength * 0.05;
+          srcY = y;
+        }
+        
+        const x0 = Math.floor(srcX);
+        const x1 = x0 + 1;
+        const y0 = Math.floor(srcY);
+        const y1 = y0 + 1;
+        
+        const wx1 = srcX - x0;
+        const wx0 = 1 - wx1;
+        const wy1 = srcY - y0;
+        const wy0 = 1 - wy1;
+        
+        const safeX0 = Math.max(0, Math.min(width - 1, x0));
+        const safeX1 = Math.max(0, Math.min(width - 1, x1));
+        const safeY0 = Math.max(0, Math.min(height - 1, y0));
+        const safeY1 = Math.max(0, Math.min(height - 1, y1));
+        
+        const idx00 = (safeY0 * width + safeX0) * 2;
+        const idx10 = (safeY0 * width + safeX1) * 2;
+        const idx01 = (safeY1 * width + safeX0) * 2;
+        const idx11 = (safeY1 * width + safeX1) * 2;
+        
+        const origX = 
+          (uMap[idx00] * wx0 + uMap[idx10] * wx1) * wy0 +
+          (uMap[idx01] * wx0 + uMap[idx11] * wx1) * wy1;
+          
+        const origY = 
+          (uMap[idx00 + 1] * wx0 + uMap[idx10 + 1] * wx1) * wy0 +
+          (uMap[idx01 + 1] * wx0 + uMap[idx11 + 1] * wx1) * wy1;
+          
+        const dstIdx = (y * width + x) * 2;
+        tempUMap[dstIdx] = origX;
+        tempUMap[dstIdx + 1] = origY;
+      }
+    }
+  }
+  
+  const src = originalData.data;
+  const dst = currentData.data;
+  
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const idx = (y * width + x) * 2;
+      const origX = tempUMap[idx];
+      const origY = tempUMap[idx + 1];
+      
+      uMap[idx] = origX;
+      uMap[idx + 1] = origY;
+      
+      const x0 = Math.floor(origX);
+      const x1 = x0 + 1;
+      const y0 = Math.floor(origY);
+      const y1 = y0 + 1;
+      
+      const wx1 = origX - x0;
+      const wx0 = 1 - wx1;
+      const wy1 = origY - y0;
+      const wy0 = 1 - wy1;
+      
+      const safeX0 = Math.max(0, Math.min(width - 1, x0));
+      const safeX1 = Math.max(0, Math.min(width - 1, x1));
+      const safeY0 = Math.max(0, Math.min(height - 1, y0));
+      const safeY1 = Math.max(0, Math.min(height - 1, y1));
+      
+      const idx00 = (safeY0 * width + safeX0) * 4;
+      const idx10 = (safeY0 * width + safeX1) * 4;
+      const idx01 = (safeY1 * width + safeX0) * 4;
+      const idx11 = (safeY1 * width + safeX1) * 4;
+      
+      const dstIdx = (y * width + x) * 4;
+      
+      for (let c = 0; c < 4; c++) {
+        const val00 = src[idx00 + c];
+        const val10 = src[idx10 + c];
+        const val01 = src[idx01 + c];
+        const val11 = src[idx11 + c];
+        
+        const val0 = val00 * wx0 + val10 * wx1;
+        const val1 = val01 * wx0 + val11 * wx1;
+        dst[dstIdx + c] = val0 * wy0 + val1 * wy1;
+      }
+    }
+  }
+}
+
+function applyLassoScale(
+  uMap: Float32Array,
+  baseUMap: Float32Array,
+  mask: Uint8ClampedArray,
+  width: number,
+  height: number,
+  centroidX: number,
+  centroidY: number,
+  bbox: {minX: number, minY: number, maxX: number, maxY: number},
+  scale: number
+) {
+  const { minX, minY, maxX, maxY } = bbox;
+  
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const maskIdx = (y * width + x) * 4;
+      const weight = mask[maskIdx] / 255;
+      
+      if (weight > 0) {
+        const dx = x - centroidX;
+        const dy = y - centroidY;
+        
+        const sampleX = centroidX + dx / scale;
+        const sampleY = centroidY + dy / scale;
+        
+        const finalX = x + (sampleX - x) * weight;
+        const finalY = y + (sampleY - y) * weight;
+        
+        const x0 = Math.floor(finalX);
+        const x1 = x0 + 1;
+        const y0 = Math.floor(finalY);
+        const y1 = y0 + 1;
+        
+        const wx1 = finalX - x0;
+        const wx0 = 1 - wx1;
+        const wy1 = finalY - y0;
+        const wy0 = 1 - wy1;
+        
+        const safeX0 = Math.max(0, Math.min(width - 1, x0));
+        const safeX1 = Math.max(0, Math.min(width - 1, x1));
+        const safeY0 = Math.max(0, Math.min(height - 1, y0));
+        const safeY1 = Math.max(0, Math.min(height - 1, y1));
+        
+        const idx00 = (safeY0 * width + safeX0) * 2;
+        const idx10 = (safeY0 * width + safeX1) * 2;
+        const idx01 = (safeY1 * width + safeX0) * 2;
+        const idx11 = (safeY1 * width + safeX1) * 2;
+        
+        const origX = 
+          (baseUMap[idx00] * wx0 + baseUMap[idx10] * wx1) * wy0 +
+          (baseUMap[idx01] * wx0 + baseUMap[idx11] * wx1) * wy1;
+          
+        const origY = 
+          (baseUMap[idx00 + 1] * wx0 + baseUMap[idx10 + 1] * wx1) * wy0 +
+          (baseUMap[idx01 + 1] * wx0 + baseUMap[idx11 + 1] * wx1) * wy1;
+          
+        const dstIdx = (y * width + x) * 2;
+        uMap[dstIdx] = origX;
+        uMap[dstIdx + 1] = origY;
+      }
+    }
+  }
+}
+
+export default function App() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  
+  const [toolMode, setToolMode] = useState<ToolMode>('push');
+  const [brushSize, setBrushSize] = useState(80);
+  const [brushStrength, setBrushStrength] = useState(0.5);
+  
+  const [lassoPoints, setLassoPoints] = useState<{x: number, y: number}[]>([]);
+  const [isLassoClosed, setIsLassoClosed] = useState(false);
+  const [lassoScale, setLassoScale] = useState(1);
+  const [lassoFeather, setLassoFeather] = useState(20);
+  const [lassoInvert, setLassoInvert] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  
+  const lassoPointsRef = useRef<{x: number, y: number}[]>([]);
+  const lassoBaseUMapRef = useRef<Float32Array | null>(null);
+  const lassoMaskRef = useRef<Uint8ClampedArray | null>(null);
+  const lassoCentroidRef = useRef<{x: number, y: number} | null>(null);
+  const lassoBBoxRef = useRef<{minX: number, minY: number, maxX: number, maxY: number} | null>(null);
+  const lastMaskSettingsRef = useRef({ feather: -1, invert: false });
+  
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  
+  const toolModeRef = useRef<ToolMode>('push');
+  const brushSizeRef = useRef(80);
+  const brushStrengthRef = useRef(0.5);
+  
+  useEffect(() => { toolModeRef.current = toolMode; }, [toolMode]);
+  useEffect(() => { brushSizeRef.current = brushSize; }, [brushSize]);
+  useEffect(() => { brushStrengthRef.current = brushStrength; }, [brushStrength]);
+  
+  const undoStackRef = useRef<Float32Array[]>([]);
+  const redoStackRef = useRef<Float32Array[]>([]);
+  
+  const originalDataRef = useRef<ImageData | null>(null);
+  const currentDataRef = useRef<ImageData | null>(null);
+  const uMapRef = useRef<Float32Array | null>(null);
+  const tempUMapRef = useRef<Float32Array | null>(null);
+  
+  const isDraggingRef = useRef(false);
+  const lastPosRef = useRef<{x: number, y: number} | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  
+  const [cursorPos, setCursorPos] = useState<{x: number, y: number} | null>(null);
+  const [, setTick] = useState(0);
+  const forceUpdate = () => setTick(t => t + 1);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const preventScroll = (e: TouchEvent) => {
+      if (isDraggingRef.current) {
+        e.preventDefault();
+      }
+    };
+    canvas.addEventListener('touchmove', preventScroll, { passive: false });
+    return () => canvas.removeEventListener('touchmove', preventScroll);
+  }, [imageLoaded]);
+
+  useEffect(() => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas || !currentDataRef.current) return;
+    canvas.width = currentDataRef.current.width;
+    canvas.height = currentDataRef.current.height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    if (toolMode === 'lasso' && lassoPoints.length > 0) {
+      ctx.beginPath();
+      ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+      for (let i = 1; i < lassoPoints.length; i++) {
+        ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+      }
+      if (isLassoClosed) ctx.closePath();
+      
+      ctx.strokeStyle = 'white';
+      const rect = canvas.getBoundingClientRect();
+      ctx.lineWidth = rect.width > 0 ? 2 / (rect.width / canvas.width) : 2;
+      if (!isLassoClosed) ctx.setLineDash([5, 5]);
+      ctx.stroke();
+      
+      if (isLassoClosed) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        if (lassoInvert) {
+          ctx.rect(0, 0, canvas.width, canvas.height);
+          ctx.fill('evenodd');
+        } else {
+          ctx.fill();
+        }
+      }
+    }
+  }, [lassoPoints, isLassoClosed, toolMode, lassoInvert]);
+
+  useEffect(() => {
+    if (toolMode === 'lasso' && isLassoClosed && lassoBaseUMapRef.current && uMapRef.current && originalDataRef.current && currentDataRef.current && lassoCentroidRef.current) {
+      const width = currentDataRef.current.width;
+      const height = currentDataRef.current.height;
+      
+      if (lastMaskSettingsRef.current.feather !== lassoFeather || lastMaskSettingsRef.current.invert !== lassoInvert || !lassoMaskRef.current) {
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = width;
+        maskCanvas.height = height;
+        const mCtx = maskCanvas.getContext('2d')!;
+        
+        mCtx.fillStyle = lassoInvert ? 'white' : 'black';
+        mCtx.fillRect(0, 0, width, height);
+        mCtx.filter = `blur(${lassoFeather}px)`;
+        mCtx.beginPath();
+        if (lassoPointsRef.current.length > 0) {
+          mCtx.moveTo(lassoPointsRef.current[0].x, lassoPointsRef.current[0].y);
+          let minX = width, minY = height, maxX = 0, maxY = 0;
+          for (const p of lassoPointsRef.current) {
+            mCtx.lineTo(p.x, p.y);
+            minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+          }
+          mCtx.closePath();
+          mCtx.fillStyle = lassoInvert ? 'black' : 'white';
+          mCtx.fill();
+          
+          lassoMaskRef.current = mCtx.getImageData(0, 0, width, height).data;
+          
+          if (lassoInvert) {
+            lassoBBoxRef.current = { minX: 0, minY: 0, maxX: width - 1, maxY: height - 1 };
+          } else {
+            const blurPad = lassoFeather * 2;
+            lassoBBoxRef.current = {
+              minX: Math.max(0, Math.floor(minX - blurPad)),
+              minY: Math.max(0, Math.floor(minY - blurPad)),
+              maxX: Math.min(width - 1, Math.ceil(maxX + blurPad)),
+              maxY: Math.min(height - 1, Math.ceil(maxY + blurPad))
+            };
+          }
+        }
+        lastMaskSettingsRef.current = { feather: lassoFeather, invert: lassoInvert };
+      }
+
+      if (lassoMaskRef.current && lassoBBoxRef.current) {
+        uMapRef.current.set(lassoBaseUMapRef.current);
+        applyLassoScale(
+          uMapRef.current,
+          lassoBaseUMapRef.current,
+          lassoMaskRef.current,
+          width,
+          height,
+          lassoCentroidRef.current.x,
+          lassoCentroidRef.current.y,
+          lassoBBoxRef.current,
+          lassoScale
+        );
+        renderFullImage(uMapRef.current, originalDataRef.current, currentDataRef.current);
+        const ctx = canvasRef.current?.getContext('2d');
+        if (ctx) ctx.putImageData(currentDataRef.current, 0, 0);
+      }
+    }
+  }, [lassoScale, lassoFeather, lassoInvert, isLassoClosed, toolMode]);
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_DIM = 1200;
+        let width = img.width;
+        let height = img.height;
+        if (width > MAX_DIM || height > MAX_DIM) {
+          const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.width = width;
+        canvas.height = height;
+        
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+        
+        ctx.drawImage(img, 0, 0, width, height);
+        const imageData = ctx.getImageData(0, 0, width, height);
+        
+        originalDataRef.current = imageData;
+        currentDataRef.current = new ImageData(new Uint8ClampedArray(imageData.data), width, height);
+        
+        const uMap = new Float32Array(width * height * 2);
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const idx = (y * width + x) * 2;
+            uMap[idx] = x;
+            uMap[idx + 1] = y;
+          }
+        }
+        uMapRef.current = uMap;
+        tempUMapRef.current = new Float32Array(uMap);
+        
+        undoStackRef.current = [new Float32Array(uMap)];
+        redoStackRef.current = [];
+        
+        setImageLoaded(true);
+        forceUpdate();
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const getMousePos = (e: React.PointerEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const applyContinuousWarp = () => {
+    if (!isDraggingRef.current || !lastPosRef.current || !currentDataRef.current || !originalDataRef.current || !uMapRef.current || !tempUMapRef.current) return;
+    if (toolModeRef.current === 'push') return;
+
+    applyWarp(
+      uMapRef.current,
+      tempUMapRef.current,
+      originalDataRef.current,
+      currentDataRef.current,
+      lastPosRef.current.x,
+      lastPosRef.current.y,
+      0,
+      0,
+      brushSizeRef.current,
+      brushStrengthRef.current,
+      toolModeRef.current
+    );
+
+    const ctx = canvasRef.current?.getContext('2d');
+    if (ctx) {
+      const minX = Math.max(0, Math.floor(lastPosRef.current.x - brushSizeRef.current));
+      const minY = Math.max(0, Math.floor(lastPosRef.current.y - brushSizeRef.current));
+      const maxX = Math.min(currentDataRef.current.width - 1, Math.ceil(lastPosRef.current.x + brushSizeRef.current));
+      const maxY = Math.min(currentDataRef.current.height - 1, Math.ceil(lastPosRef.current.y + brushSizeRef.current));
+      
+      const safeMinX = Math.max(0, minX);
+      const safeMinY = Math.max(0, minY);
+      const safeMaxX = Math.min(currentDataRef.current.width - 1, maxX);
+      const safeMaxY = Math.min(currentDataRef.current.height - 1, maxY);
+      
+      ctx.putImageData(
+        currentDataRef.current, 
+        0, 0, 
+        safeMinX, safeMinY, 
+        safeMaxX - safeMinX + 1, safeMaxY - safeMinY + 1
+      );
+    }
+
+    animationFrameRef.current = requestAnimationFrame(applyContinuousWarp);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!imageLoaded) return;
+    isDraggingRef.current = true;
+    lastPosRef.current = getMousePos(e);
+    
+    if (toolModeRef.current === 'lasso') {
+      if (isLassoClosed) {
+        setIsLassoClosed(false);
+        setLassoScale(1);
+        lassoPointsRef.current = [];
+        setLassoPoints([]);
+        if (uMapRef.current) {
+          undoStackRef.current.push(new Float32Array(uMapRef.current));
+          if (undoStackRef.current.length > 20) undoStackRef.current.shift();
+          redoStackRef.current = [];
+        }
+      } else {
+        lassoPointsRef.current = [getMousePos(e)];
+        setLassoPoints([...lassoPointsRef.current]);
+      }
+      return;
+    }
+    
+    if (toolModeRef.current !== 'push') {
+      applyContinuousWarp();
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    setCursorPos({ x: e.clientX, y: e.clientY });
+    
+    if (toolModeRef.current === 'lasso') {
+      if (isDraggingRef.current && !isLassoClosed) {
+        lassoPointsRef.current.push(getMousePos(e));
+        setLassoPoints([...lassoPointsRef.current]);
+      }
+      return;
+    }
+    
+    if (!isDraggingRef.current || !lastPosRef.current || !currentDataRef.current || !originalDataRef.current || !uMapRef.current || !tempUMapRef.current) return;
+    
+    const currentPos = getMousePos(e);
+    
+    if (toolModeRef.current === 'push') {
+      const moveX = currentPos.x - lastPosRef.current.x;
+      const moveY = currentPos.y - lastPosRef.current.y;
+      
+      if (Math.abs(moveX) < 0.1 && Math.abs(moveY) < 0.1) return;
+      
+      const distance = Math.sqrt(moveX * moveX + moveY * moveY);
+      const steps = Math.max(1, Math.ceil(distance / (brushSizeRef.current / 4)));
+      
+      const stepX = moveX / steps;
+      const stepY = moveY / steps;
+      
+      let minDirtyX = currentDataRef.current.width;
+      let minDirtyY = currentDataRef.current.height;
+      let maxDirtyX = 0;
+      let maxDirtyY = 0;
+      
+      for (let i = 1; i <= steps; i++) {
+        const stepCenterX = lastPosRef.current.x + stepX * i;
+        const stepCenterY = lastPosRef.current.y + stepY * i;
+        
+        applyWarp(
+          uMapRef.current,
+          tempUMapRef.current,
+          originalDataRef.current,
+          currentDataRef.current,
+          stepCenterX,
+          stepCenterY,
+          stepX,
+          stepY,
+          brushSizeRef.current,
+          brushStrengthRef.current,
+          'push'
+        );
+        
+        minDirtyX = Math.min(minDirtyX, Math.floor(stepCenterX - brushSizeRef.current));
+        minDirtyY = Math.min(minDirtyY, Math.floor(stepCenterY - brushSizeRef.current));
+        maxDirtyX = Math.max(maxDirtyX, Math.ceil(stepCenterX + brushSizeRef.current));
+        maxDirtyY = Math.max(maxDirtyY, Math.ceil(stepCenterY + brushSizeRef.current));
+      }
+      
+      const ctx = canvasRef.current?.getContext('2d');
+      if (ctx) {
+        const safeMinX = Math.max(0, minDirtyX);
+        const safeMinY = Math.max(0, minDirtyY);
+        const safeMaxX = Math.min(currentDataRef.current.width - 1, maxDirtyX);
+        const safeMaxY = Math.min(currentDataRef.current.height - 1, maxDirtyY);
+        
+        ctx.putImageData(
+          currentDataRef.current, 
+          0, 0, 
+          safeMinX, safeMinY, 
+          safeMaxX - safeMinX + 1, safeMaxY - safeMinY + 1
+        );
+      }
+    }
+    
+    lastPosRef.current = currentPos;
+  };
+
+  const handlePointerUp = () => {
+    if (toolModeRef.current === 'lasso' && !isLassoClosed && isDraggingRef.current) {
+      isDraggingRef.current = false;
+      if (lassoPointsRef.current.length > 2) {
+        setIsLassoClosed(true);
+        setLassoScale(1);
+        
+        let sumX = 0, sumY = 0;
+        for (const p of lassoPointsRef.current) {
+          sumX += p.x; sumY += p.y;
+        }
+        lassoCentroidRef.current = { x: sumX / lassoPointsRef.current.length, y: sumY / lassoPointsRef.current.length };
+        
+        lassoBaseUMapRef.current = new Float32Array(uMapRef.current!);
+        lastMaskSettingsRef.current = { feather: -1, invert: false };
+      } else {
+        lassoPointsRef.current = [];
+        setLassoPoints([]);
+      }
+      return;
+    }
+
+    if (isDraggingRef.current) {
+      isDraggingRef.current = false;
+      lastPosRef.current = null;
+      
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      
+      if (uMapRef.current) {
+        undoStackRef.current.push(new Float32Array(uMapRef.current));
+        if (undoStackRef.current.length > 20) {
+          undoStackRef.current.shift();
+        }
+        redoStackRef.current = [];
+        forceUpdate();
+      }
+    }
+  };
+
+  const undo = () => {
+    if (undoStackRef.current.length <= 1) return;
+    
+    const current = undoStackRef.current.pop()!;
+    redoStackRef.current.push(current);
+    
+    const previous = undoStackRef.current[undoStackRef.current.length - 1];
+    
+    uMapRef.current = new Float32Array(previous);
+    tempUMapRef.current = new Float32Array(previous);
+    
+    if (originalDataRef.current && currentDataRef.current) {
+      renderFullImage(uMapRef.current, originalDataRef.current, currentDataRef.current);
+      const ctx = canvasRef.current?.getContext('2d');
+      if (ctx) ctx.putImageData(currentDataRef.current, 0, 0);
+    }
+    
+    forceUpdate();
+  };
+
+  const redo = () => {
+    if (redoStackRef.current.length === 0) return;
+    
+    const next = redoStackRef.current.pop()!;
+    undoStackRef.current.push(next);
+    
+    uMapRef.current = new Float32Array(next);
+    tempUMapRef.current = new Float32Array(next);
+    
+    if (originalDataRef.current && currentDataRef.current) {
+      renderFullImage(uMapRef.current, originalDataRef.current, currentDataRef.current);
+      const ctx = canvasRef.current?.getContext('2d');
+      if (ctx) ctx.putImageData(currentDataRef.current, 0, 0);
+    }
+    
+    forceUpdate();
+  };
+
+  const download = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const link = document.createElement('a');
+    link.download = 'liquify-edit.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  };
+
+  const getCssBrushSize = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return brushSize;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width / canvas.width;
+    return brushSize * scaleX * 2;
+  };
+
+  const tools = [
+    { id: 'push', icon: Move, label: 'Push' },
+    { id: 'expand', icon: Maximize, label: 'Expand' },
+    { id: 'pinch', icon: Minimize, label: 'Pinch' },
+    { id: 'stretch-v', icon: ArrowUpDown, label: 'Stretch Vertically' },
+    { id: 'stretch-h', icon: ArrowLeftRight, label: 'Stretch Horizontally' },
+    { id: 'lasso', icon: Lasso, label: 'Lasso Scale' },
+  ] as const;
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans">
+      <header className="h-14 border-b border-neutral-800 flex items-center justify-between px-4 shrink-0 bg-neutral-900 z-30 relative">
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="p-1.5 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 rounded-md transition-colors"
+            title={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+          >
+            {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-white" />
+            </div>
+            <h1 className="font-medium text-lg tracking-tight">Liquify</h1>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={undo} disabled={undoStackRef.current.length <= 1} className="p-2 hover:bg-neutral-800 rounded-md disabled:opacity-50 transition-colors">
+            <Undo className="w-5 h-5" />
+          </button>
+          <button onClick={redo} disabled={redoStackRef.current.length === 0} className="p-2 hover:bg-neutral-800 rounded-md disabled:opacity-50 transition-colors">
+            <Redo className="w-5 h-5" />
+          </button>
+          <button onClick={download} disabled={!imageLoaded} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-neutral-800 disabled:text-neutral-500 rounded-md text-sm font-medium transition-colors ml-2">
+            <Download className="w-4 h-4" />
+            Export
+          </button>
+        </div>
+      </header>
+
+      <div className="flex flex-1 overflow-hidden">
+        <aside 
+          className={`bg-neutral-900/50 flex flex-col shrink-0 transition-all duration-300 ease-in-out overflow-hidden z-20 relative ${
+            isSidebarOpen ? 'w-64 border-r border-neutral-800' : 'w-0 border-r-0'
+          }`}
+        >
+          <div className="w-64 p-5 flex flex-col gap-8 h-full overflow-y-auto">
+            {!imageLoaded ? (
+              <div className="flex flex-col gap-2">
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-neutral-700 rounded-xl cursor-pointer hover:border-indigo-500 hover:bg-indigo-500/10 transition-colors">
+                  <Upload className="w-6 h-6 text-neutral-400 mb-2" />
+                  <span className="text-sm font-medium text-neutral-300">Upload Image</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                </label>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-col gap-3">
+                  <label className="text-sm font-medium text-neutral-300">Tools</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {tools.map((tool) => {
+                      const Icon = tool.icon;
+                      return (
+                        <button
+                          key={tool.id}
+                          onClick={() => setToolMode(tool.id as ToolMode)}
+                          title={tool.label}
+                          className={`flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-colors ${
+                            toolMode === tool.id 
+                              ? 'bg-indigo-500/10 border-indigo-500 text-indigo-400' 
+                              : 'bg-neutral-800/50 border-transparent text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
+                          }`}
+                        >
+                          <Icon className="w-5 h-5" />
+                          <span className="text-[10px] font-medium uppercase tracking-wider">{tool.label.split(' ')[0]}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  <div className="flex justify-between items-center">
+                    <label className="text-sm font-medium text-neutral-300">Brush Size</label>
+                    <span className="text-xs font-mono text-neutral-500 bg-neutral-800 px-2 py-1 rounded">{brushSize}px</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="10" 
+                    max="300" 
+                    value={brushSize} 
+                    onChange={(e) => setBrushSize(Number(e.target.value))}
+                    className="w-full accent-indigo-500"
+                  />
+                </div>
+                
+                {toolMode === 'lasso' && isLassoClosed && (
+                  <div className="flex flex-col gap-4 mt-2 p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-xl">
+                    <div className="flex justify-between items-center">
+                      <label className="text-sm font-medium text-indigo-300">Lasso Scale</label>
+                      <span className="text-xs font-mono text-indigo-200 bg-indigo-900/50 px-2 py-1 rounded">{lassoScale.toFixed(2)}x</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0.5" 
+                      max="2" 
+                      step="0.01"
+                      value={lassoScale} 
+                      onChange={(e) => setLassoScale(Number(e.target.value))}
+                      className="w-full accent-indigo-400"
+                    />
+                    
+                    <div className="flex justify-between items-center mt-2">
+                      <label className="text-sm font-medium text-indigo-300">Feather</label>
+                      <span className="text-xs font-mono text-indigo-200 bg-indigo-900/50 px-2 py-1 rounded">{lassoFeather}px</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="100" 
+                      step="1"
+                      value={lassoFeather} 
+                      onChange={(e) => setLassoFeather(Number(e.target.value))}
+                      className="w-full accent-indigo-400"
+                    />
+
+                    <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={lassoInvert}
+                        onChange={(e) => setLassoInvert(e.target.checked)}
+                        className="w-4 h-4 accent-indigo-500 rounded border-neutral-700 bg-neutral-800"
+                      />
+                      <span className="text-sm font-medium text-indigo-300">Invert Selection</span>
+                    </label>
+
+                    <button 
+                      onClick={() => {
+                        setIsLassoClosed(false);
+                        setLassoPoints([]);
+                        lassoPointsRef.current = [];
+                        if (uMapRef.current) {
+                          undoStackRef.current.push(new Float32Array(uMapRef.current));
+                          if (undoStackRef.current.length > 20) undoStackRef.current.shift();
+                          redoStackRef.current = [];
+                        }
+                      }}
+                      className="w-full py-1.5 mt-2 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-medium text-white transition-colors"
+                    >
+                      Apply & Clear
+                    </button>
+                  </div>
+                )}
+                
+                <div className="flex flex-col gap-4">
+                  <div className="flex justify-between items-center">
+                    <label className="text-sm font-medium text-neutral-300">Strength</label>
+                    <span className="text-xs font-mono text-neutral-500 bg-neutral-800 px-2 py-1 rounded">{Math.round(brushStrength * 100)}%</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0.1" 
+                    max="1" 
+                    step="0.05"
+                    value={brushStrength} 
+                    onChange={(e) => setBrushStrength(Number(e.target.value))}
+                    className="w-full accent-indigo-500"
+                  />
+                </div>
+                
+                <div className="mt-auto flex flex-col gap-3">
+                  <button 
+                    onClick={() => {
+                      if (undoStackRef.current.length > 0) {
+                        const original = undoStackRef.current[0];
+                        uMapRef.current = new Float32Array(original);
+                        tempUMapRef.current = new Float32Array(original);
+                        
+                        if (originalDataRef.current && currentDataRef.current) {
+                          renderFullImage(uMapRef.current, originalDataRef.current, currentDataRef.current);
+                          const ctx = canvasRef.current?.getContext('2d');
+                          if (ctx) ctx.putImageData(currentDataRef.current, 0, 0);
+                        }
+                        
+                        undoStackRef.current = [original];
+                        redoStackRef.current = [];
+                        forceUpdate();
+                      }
+                    }}
+                    className="w-full px-4 py-2 border border-neutral-700 hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Reset Image
+                  </button>
+                  <label className="w-full px-4 py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium transition-colors text-center cursor-pointer">
+                    Upload New
+                    <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+        </aside>
+
+        <main 
+          className="flex-1 relative bg-neutral-950 flex items-center justify-center overflow-hidden p-8"
+          onPointerLeave={() => {
+            setCursorPos(null);
+            handlePointerUp();
+          }}
+        >
+          <div className={`relative max-w-full max-h-full flex items-center justify-center ${!imageLoaded ? 'hidden' : ''}`}>
+            <canvas
+              ref={canvasRef}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              className="max-w-full max-h-full object-contain cursor-crosshair shadow-2xl rounded-sm"
+              style={{ touchAction: 'none' }}
+            />
+            <canvas
+              ref={overlayCanvasRef}
+              className="absolute inset-0 w-full h-full pointer-events-none object-contain"
+            />
+            {cursorPos && !isDraggingRef.current && imageLoaded && toolMode !== 'lasso' && (
+              <div 
+                className="fixed pointer-events-none border border-white/50 rounded-full bg-white/10 mix-blend-difference z-50"
+                style={{
+                  width: getCssBrushSize(),
+                  height: getCssBrushSize(),
+                  left: cursorPos.x,
+                  top: cursorPos.y,
+                  transform: 'translate(-50%, -50%)'
+                }}
+              />
+            )}
+          </div>
+          {!imageLoaded && (
+            <div className="text-neutral-600 flex flex-col items-center gap-4">
+              <ImageIcon className="w-16 h-16 opacity-20" />
+              <p className="text-sm font-medium">Upload an image to start editing</p>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
