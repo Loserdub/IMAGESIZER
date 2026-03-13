@@ -854,131 +854,171 @@ export default function App() {
   ] as const;
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans">
-      <header className="h-14 border-b border-neutral-800 flex items-center justify-between px-4 shrink-0 bg-neutral-900 z-30 relative">
-        <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-[#0a1a12] text-emerald-50 flex flex-col font-sans selection:bg-emerald-500/30">
+      {/* Header */}
+      <header className="h-16 border-b border-white/5 flex items-center justify-between px-6 shrink-0 bg-white/5 backdrop-blur-md z-30 relative shadow-[0_4px_30px_rgba(0,0,0,0.1)]">
+        <div className="flex items-center gap-4">
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-1.5 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 rounded-md transition-colors"
+            className="p-2 text-emerald-200/70 hover:text-emerald-50 hover:bg-white/10 rounded-xl transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] border border-white/5"
             title={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
           >
             {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
           </button>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-900/50 border border-emerald-300/30">
+              <Sparkles className="w-5 h-5 text-emerald-50" />
             </div>
-            <h1 className="font-medium text-lg tracking-tight">Liquify</h1>
+            <h1 className="font-semibold text-xl tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-emerald-100 to-emerald-300">jray.me</h1>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={undo} disabled={undoStackRef.current.length <= 1} className="p-2 hover:bg-neutral-800 rounded-md disabled:opacity-50 transition-colors">
-            <Undo className="w-5 h-5" />
-          </button>
-          <button onClick={redo} disabled={redoStackRef.current.length === 0} className="p-2 hover:bg-neutral-800 rounded-md disabled:opacity-50 transition-colors">
-            <Redo className="w-5 h-5" />
-          </button>
-          <button onClick={download} disabled={!imageLoaded} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-neutral-800 disabled:text-neutral-500 rounded-md text-sm font-medium transition-colors ml-2">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center bg-black/20 rounded-xl p-1 border border-white/5 shadow-inner">
+            <button onClick={undo} disabled={undoStackRef.current.length <= 1} className="p-2 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-all text-emerald-200/70 hover:text-emerald-50">
+              <Undo className="w-4 h-4" />
+            </button>
+            <div className="w-px h-4 bg-white/10 mx-1" />
+            <button onClick={redo} disabled={redoStackRef.current.length === 0} className="p-2 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-all text-emerald-200/70 hover:text-emerald-50">
+              <Redo className="w-4 h-4" />
+            </button>
+          </div>
+          <button onClick={download} disabled={!imageLoaded} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 disabled:from-emerald-900/50 disabled:to-emerald-900/50 disabled:text-emerald-500/50 rounded-xl text-sm font-semibold transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_4px_10px_rgba(16,185,129,0.2)] border border-emerald-400/30 ml-2">
             <Download className="w-4 h-4" />
             Export
           </button>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Background ambient glow */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
+          <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-900/20 blur-[120px]" />
+          <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-800/10 blur-[120px]" />
+        </div>
+
         <aside 
-          className={`bg-neutral-900/50 flex flex-col shrink-0 transition-all duration-300 ease-in-out overflow-hidden z-20 relative ${
-            isSidebarOpen ? 'w-64 border-r border-neutral-800' : 'w-0 border-r-0'
+          className={`flex flex-col shrink-0 transition-all duration-300 ease-in-out overflow-hidden z-20 relative ${
+            isSidebarOpen ? 'w-80' : 'w-0'
           }`}
         >
-          <div className="w-64 p-5 flex flex-col gap-8 h-full overflow-y-auto">
+          <div className="w-80 p-6 flex flex-col gap-4 h-full overflow-y-auto hide-scrollbar">
             {!imageLoaded ? (
               <div className="flex flex-col gap-2">
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-neutral-700 rounded-xl cursor-pointer hover:border-indigo-500 hover:bg-indigo-500/10 transition-colors">
-                  <Upload className="w-6 h-6 text-neutral-400 mb-2" />
-                  <span className="text-sm font-medium text-neutral-300">Upload Image</span>
+                <label className="flex flex-col items-center justify-center w-full h-40 bg-white/5 backdrop-blur-md border border-white/10 rounded-3xl cursor-pointer hover:bg-white/10 hover:border-emerald-500/50 transition-all shadow-xl shadow-black/20 group">
+                  <div className="w-12 h-12 bg-black/30 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform shadow-inner border border-white/5">
+                    <Upload className="w-6 h-6 text-emerald-400" />
+                  </div>
+                  <span className="text-sm font-medium text-emerald-200/70 group-hover:text-emerald-100">Upload Image</span>
                   <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                 </label>
               </div>
             ) : (
-              <>
-                <div className="flex flex-col gap-3">
-                  <label className="text-sm font-medium text-neutral-300">Tools</label>
+              <div className="flex flex-col gap-4">
+                {/* Bento Block: Tools */}
+                <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-3xl p-4 shadow-xl shadow-black/20">
+                  <label className="text-xs font-bold tracking-wider text-emerald-500/70 uppercase mb-3 block px-1">Tools</label>
                   <div className="grid grid-cols-2 gap-2">
                     {tools.map((tool) => {
                       const Icon = tool.icon;
+                      const isActive = toolMode === tool.id;
                       return (
                         <button
                           key={tool.id}
                           onClick={() => setToolMode(tool.id as ToolMode)}
                           title={tool.label}
-                          className={`flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-colors ${
-                            toolMode === tool.id 
-                              ? 'bg-indigo-500/10 border-indigo-500 text-indigo-400' 
-                              : 'bg-neutral-800/50 border-transparent text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
+                          className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border transition-all ${
+                            isActive 
+                              ? 'bg-gradient-to-b from-emerald-500/20 to-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]' 
+                              : 'bg-black/20 border-white/5 text-emerald-200/50 hover:bg-white/5 hover:text-emerald-100 shadow-inner'
                           }`}
                         >
                           <Icon className="w-5 h-5" />
-                          <span className="text-[10px] font-medium uppercase tracking-wider">{tool.label.split(' ')[0]}</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-wider">{tool.label.split(' ')[0]}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-4">
-                  <div className="flex justify-between items-center">
-                    <label className="text-sm font-medium text-neutral-300">Brush Size</label>
-                    <span className="text-xs font-mono text-neutral-500 bg-neutral-800 px-2 py-1 rounded">{brushSize}px</span>
+                {/* Bento Block: Brush Settings */}
+                <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-3xl p-5 shadow-xl shadow-black/20 flex flex-col gap-5">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-xs font-bold tracking-wider text-emerald-500/70 uppercase">Size</label>
+                      <span className="text-xs font-mono font-medium text-emerald-200 bg-black/30 px-2 py-1 rounded-lg border border-white/5 shadow-inner">{brushSize}px</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="5" 
+                      max="100" 
+                      value={brushSize} 
+                      onChange={(e) => setBrushSize(Number(e.target.value))}
+                      className="w-full accent-emerald-500 h-2 bg-black/40 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-400 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(52,211,153,0.5)] cursor-pointer"
+                    />
                   </div>
-                  <input 
-                    type="range" 
-                    min="10" 
-                    max="300" 
-                    value={brushSize} 
-                    onChange={(e) => setBrushSize(Number(e.target.value))}
-                    className="w-full accent-indigo-500"
-                  />
+                  
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-xs font-bold tracking-wider text-emerald-500/70 uppercase">Strength</label>
+                      <span className="text-xs font-mono font-medium text-emerald-200 bg-black/30 px-2 py-1 rounded-lg border border-white/5 shadow-inner">{Math.round(brushStrength * 100)}%</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0.1" 
+                      max="1" 
+                      step="0.05"
+                      value={brushStrength} 
+                      onChange={(e) => setBrushStrength(Number(e.target.value))}
+                      className="w-full accent-emerald-500 h-2 bg-black/40 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-400 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(52,211,153,0.5)] cursor-pointer"
+                    />
+                  </div>
                 </div>
                 
                 {toolMode === 'lasso' && isLassoClosed && (
-                  <div className="flex flex-col gap-4 mt-2 p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-xl">
-                    <div className="flex justify-between items-center">
-                      <label className="text-sm font-medium text-indigo-300">Lasso Scale</label>
-                      <span className="text-xs font-mono text-indigo-200 bg-indigo-900/50 px-2 py-1 rounded">{lassoScale.toFixed(2)}x</span>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0.5" 
-                      max="2" 
-                      step="0.01"
-                      value={lassoScale} 
-                      onChange={(e) => setLassoScale(Number(e.target.value))}
-                      className="w-full accent-indigo-400"
-                    />
-                    
-                    <div className="flex justify-between items-center mt-2">
-                      <label className="text-sm font-medium text-indigo-300">Feather</label>
-                      <span className="text-xs font-mono text-indigo-200 bg-indigo-900/50 px-2 py-1 rounded">{lassoFeather}px</span>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="100" 
-                      step="1"
-                      value={lassoFeather} 
-                      onChange={(e) => setLassoFeather(Number(e.target.value))}
-                      className="w-full accent-indigo-400"
-                    />
-
-                    <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                  <div className="bg-emerald-900/20 backdrop-blur-md border border-emerald-500/30 rounded-3xl p-5 shadow-xl shadow-emerald-900/20 flex flex-col gap-4">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex justify-between items-center px-1">
+                        <label className="text-xs font-bold tracking-wider text-emerald-400 uppercase">Lasso Scale</label>
+                        <span className="text-xs font-mono font-medium text-emerald-200 bg-black/30 px-2 py-1 rounded-lg border border-emerald-500/20 shadow-inner">{lassoScale.toFixed(2)}x</span>
+                      </div>
                       <input 
-                        type="checkbox" 
-                        checked={lassoInvert}
-                        onChange={(e) => setLassoInvert(e.target.checked)}
-                        className="w-4 h-4 accent-indigo-500 rounded border-neutral-700 bg-neutral-800"
+                        type="range" 
+                        min="0.5" 
+                        max="2" 
+                        step="0.01"
+                        value={lassoScale} 
+                        onChange={(e) => setLassoScale(Number(e.target.value))}
+                        className="w-full accent-emerald-400 h-2 bg-black/40 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-400 [&::-webkit-slider-thumb]:rounded-full cursor-pointer"
                       />
-                      <span className="text-sm font-medium text-indigo-300">Invert Selection</span>
+                    </div>
+                    
+                    <div className="flex flex-col gap-3">
+                      <div className="flex justify-between items-center px-1">
+                        <label className="text-xs font-bold tracking-wider text-emerald-400 uppercase">Feather</label>
+                        <span className="text-xs font-mono font-medium text-emerald-200 bg-black/30 px-2 py-1 rounded-lg border border-emerald-500/20 shadow-inner">{lassoFeather}px</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="100" 
+                        step="1"
+                        value={lassoFeather} 
+                        onChange={(e) => setLassoFeather(Number(e.target.value))}
+                        className="w-full accent-emerald-400 h-2 bg-black/40 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-400 [&::-webkit-slider-thumb]:rounded-full cursor-pointer"
+                      />
+                    </div>
+
+                    <label className="flex items-center gap-3 mt-1 cursor-pointer px-1 group">
+                      <div className="relative flex items-center justify-center w-5 h-5">
+                        <input 
+                          type="checkbox" 
+                          checked={lassoInvert}
+                          onChange={(e) => setLassoInvert(e.target.checked)}
+                          className="peer appearance-none w-5 h-5 border border-emerald-500/50 rounded-md bg-black/30 checked:bg-emerald-500 checked:border-emerald-400 transition-all shadow-inner"
+                        />
+                        <svg className="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      </div>
+                      <span className="text-sm font-medium text-emerald-200 group-hover:text-emerald-100 transition-colors">Invert Selection</span>
                     </label>
 
                     <button 
@@ -992,30 +1032,15 @@ export default function App() {
                           redoStackRef.current = [];
                         }
                       }}
-                      className="w-full py-1.5 mt-2 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-medium text-white transition-colors"
+                      className="w-full py-2.5 mt-2 bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 rounded-xl text-sm font-semibold text-white transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_4px_10px_rgba(16,185,129,0.2)] border border-emerald-400/30"
                     >
                       Apply & Clear
                     </button>
                   </div>
                 )}
                 
-                <div className="flex flex-col gap-4">
-                  <div className="flex justify-between items-center">
-                    <label className="text-sm font-medium text-neutral-300">Strength</label>
-                    <span className="text-xs font-mono text-neutral-500 bg-neutral-800 px-2 py-1 rounded">{Math.round(brushStrength * 100)}%</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="0.1" 
-                    max="1" 
-                    step="0.05"
-                    value={brushStrength} 
-                    onChange={(e) => setBrushStrength(Number(e.target.value))}
-                    className="w-full accent-indigo-500"
-                  />
-                </div>
-                
-                <div className="mt-auto flex flex-col gap-3">
+                {/* Bento Block: Actions */}
+                <div className="mt-auto flex flex-col gap-2 pt-4">
                   <button 
                     onClick={() => {
                       if (undoStackRef.current.length > 0) {
@@ -1034,23 +1059,23 @@ export default function App() {
                         forceUpdate();
                       }
                     }}
-                    className="w-full px-4 py-2 border border-neutral-700 hover:bg-neutral-800 rounded-lg text-sm font-medium transition-colors"
+                    className="w-full px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-sm font-semibold text-emerald-200/80 hover:text-emerald-50 transition-all shadow-sm"
                   >
                     Reset Image
                   </button>
-                  <label className="w-full px-4 py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium transition-colors text-center cursor-pointer">
+                  <label className="w-full px-4 py-3 bg-black/20 hover:bg-black/40 border border-white/5 rounded-2xl text-sm font-semibold text-emerald-200/80 hover:text-emerald-50 transition-all text-center cursor-pointer shadow-inner">
                     Upload New
                     <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                   </label>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </aside>
 
         <main 
           id="main-canvas-container"
-          className="flex-1 relative bg-neutral-950 flex items-center justify-center overflow-hidden p-8"
+          className="flex-1 relative bg-transparent flex items-center justify-center overflow-hidden p-8 z-10"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -1061,6 +1086,7 @@ export default function App() {
           }}
           onContextMenu={e => e.preventDefault()}
         >
+          {/* Canvas container with glassmorphic frame if image loaded */}
           <div 
             className={`relative flex items-center justify-center ${!imageLoaded ? 'hidden' : ''}`}
             style={{
@@ -1069,19 +1095,22 @@ export default function App() {
               transition: activePointersRef.current.size >= 2 ? 'none' : 'transform 0.1s ease-out'
             }}
           >
-            <canvas
-              ref={canvasRef}
-              className="max-w-full max-h-full object-contain cursor-crosshair shadow-2xl rounded-sm"
-              style={{ touchAction: 'none' }}
-            />
-            <canvas
-              ref={overlayCanvasRef}
-              className="absolute inset-0 w-full h-full pointer-events-none object-contain"
-            />
+            <div className="relative rounded-lg shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10 bg-black/20 p-1 backdrop-blur-sm">
+              <canvas
+                ref={canvasRef}
+                className="max-w-full max-h-full object-contain cursor-crosshair rounded-md"
+                style={{ touchAction: 'none' }}
+              />
+              <canvas
+                ref={overlayCanvasRef}
+                className="absolute inset-1 w-[calc(100%-8px)] h-[calc(100%-8px)] pointer-events-none object-contain rounded-md"
+              />
+            </div>
           </div>
+          
           {cursorPos && !isDraggingRef.current && imageLoaded && toolMode !== 'lasso' && toolMode !== 'pan' && (
             <div 
-              className="fixed pointer-events-none border border-white/50 rounded-full bg-white/10 mix-blend-difference z-50"
+              className="fixed pointer-events-none border border-emerald-400/50 rounded-full bg-emerald-400/10 mix-blend-screen z-50 shadow-[0_0_15px_rgba(52,211,153,0.3)] backdrop-blur-[1px]"
               style={{
                 width: getCssBrushSize(),
                 height: getCssBrushSize(),
@@ -1091,27 +1120,30 @@ export default function App() {
               }}
             />
           )}
+          
           {!imageLoaded && (
-            <div className="text-neutral-600 flex flex-col items-center gap-4">
-              <ImageIcon className="w-16 h-16 opacity-20" />
-              <p className="text-sm font-medium">Upload an image to start editing</p>
+            <div className="text-emerald-200/50 flex flex-col items-center gap-6 bg-white/5 backdrop-blur-md border border-white/10 p-12 rounded-3xl shadow-2xl">
+              <div className="w-24 h-24 bg-black/20 rounded-full flex items-center justify-center shadow-inner border border-white/5">
+                <ImageIcon className="w-10 h-10 text-emerald-500/50" />
+              </div>
+              <p className="text-base font-medium tracking-wide">Upload an image to start editing</p>
             </div>
           )}
           
           {imageLoaded && (
             <div 
-              className="absolute bottom-6 right-6 flex items-center gap-1 bg-neutral-900/90 backdrop-blur border border-neutral-800 p-1.5 rounded-xl z-30 shadow-xl"
+              className="absolute bottom-8 right-8 flex items-center gap-1 bg-white/10 backdrop-blur-xl border border-white/10 p-2 rounded-2xl z-30 shadow-[0_8px_30px_rgba(0,0,0,0.3)]"
               onPointerDown={e => e.stopPropagation()}
             >
-              <button onClick={() => setZoom(z => Math.max(0.1, z - 0.1))} className="p-2 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors">
+              <button onClick={() => setZoom(z => Math.max(0.1, z - 0.1))} className="p-2.5 hover:bg-white/10 rounded-xl text-emerald-200/70 hover:text-emerald-50 transition-all shadow-sm">
                 <Minus className="w-4 h-4" />
               </button>
-              <span className="text-xs font-mono w-14 text-center text-neutral-300">{Math.round(zoom * 100)}%</span>
-              <button onClick={() => setZoom(z => Math.min(10, z + 0.1))} className="p-2 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors">
+              <span className="text-xs font-mono font-medium w-14 text-center text-emerald-100">{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom(z => Math.min(10, z + 0.1))} className="p-2.5 hover:bg-white/10 rounded-xl text-emerald-200/70 hover:text-emerald-50 transition-all shadow-sm">
                 <Plus className="w-4 h-4" />
               </button>
-              <div className="w-px h-5 bg-neutral-700 mx-1" />
-              <button onClick={() => { setZoom(1); setPan({x: 0, y: 0}); }} className="p-2 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors" title="Reset View">
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              <button onClick={() => { setZoom(1); setPan({x: 0, y: 0}); }} className="p-2.5 hover:bg-white/10 rounded-xl text-emerald-200/70 hover:text-emerald-50 transition-all shadow-sm" title="Reset View">
                 <Maximize className="w-4 h-4" />
               </button>
             </div>
