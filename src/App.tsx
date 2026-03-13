@@ -865,12 +865,33 @@ export default function App() {
           >
             {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
           </button>
-          <div className="flex items-center gap-3">
+          <a href="https://www.jray.me" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 hover:opacity-80 transition-opacity cursor-pointer">
             <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-900/50 border border-emerald-300/30">
               <Sparkles className="w-5 h-5 text-emerald-50" />
             </div>
             <h1 className="font-semibold text-xl tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-emerald-100 to-emerald-300">jray.me</h1>
-          </div>
+          </a>
+        </div>
+
+        {/* Artsy Liquified Title */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none flex items-center justify-center">
+          <svg width="0" height="0" className="absolute">
+            <filter id="liquify-title-filter">
+              <feTurbulence type="fractalNoise" baseFrequency="0.015 0.03" numOctaves="2" result="noise">
+                <animate attributeName="baseFrequency" values="0.015 0.03;0.025 0.04;0.015 0.03" dur="10s" repeatCount="indefinite" />
+              </feTurbulence>
+              <feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G" />
+            </filter>
+          </svg>
+          <h2 
+            className="text-2xl md:text-3xl font-serif italic tracking-[0.2em] text-transparent bg-clip-text bg-gradient-to-r from-emerald-200 via-teal-100 to-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.6)]" 
+            style={{ 
+              fontFamily: "'Playfair Display', 'Georgia', serif", 
+              filter: 'url(#liquify-title-filter)' 
+            }}
+          >
+            Liquify
+          </h2>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center bg-black/20 rounded-xl p-1 border border-white/5 shadow-inner">
