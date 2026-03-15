@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Undo, Redo, Download, Upload, Image as ImageIcon, Move, Maximize, Minimize, ArrowUpDown, ArrowLeftRight, Lasso, PanelLeftClose, PanelLeftOpen, Hand, ZoomIn, ZoomOut, Plus, Minus } from 'lucide-react';
+import { Sparkles, Undo, Redo, Download, Upload, Image as ImageIcon, Move, Maximize, Minimize, ArrowUpDown, ArrowLeftRight, Lasso, PanelLeftClose, PanelLeftOpen, Hand, ZoomIn, ZoomOut, Plus, Minus, Droplet } from 'lucide-react';
 
-type ToolMode = 'push' | 'expand' | 'pinch' | 'stretch-v' | 'stretch-h' | 'lasso' | 'pan';
+type ToolMode = 'push' | 'expand' | 'pinch' | 'stretch-v' | 'stretch-h' | 'lasso' | 'pan' | 'blend';
 
 function renderFullImage(uMap: Float32Array, originalData: ImageData, currentData: ImageData) {
   const width = originalData.width;
@@ -87,6 +87,39 @@ function applyWarp(
       
       if (dist2 < r2) {
         const falloff = Math.pow(1 - dist2 / r2, 2);
+        
+        if (mode === 'blend') {
+          let sumX = 0;
+          let sumY = 0;
+          let count = 0;
+          const blurRadius = 2;
+          for (let by = -blurRadius; by <= blurRadius; by++) {
+            for (let bx = -blurRadius; bx <= blurRadius; bx++) {
+              const sx = Math.max(0, Math.min(width - 1, x + bx));
+              const sy = Math.max(0, Math.min(height - 1, y + by));
+              const sIdx = (sy * width + sx) * 2;
+              sumX += uMap[sIdx];
+              sumY += uMap[sIdx + 1];
+              count++;
+            }
+          }
+          const avgX = sumX / count;
+          const avgY = sumY / count;
+          
+          const currentIdx = (y * width + x) * 2;
+          const currentOrigX = uMap[currentIdx];
+          const currentOrigY = uMap[currentIdx + 1];
+          
+          const blendAmount = falloff * strength * 0.5;
+          
+          const origX = currentOrigX + (avgX - currentOrigX) * blendAmount;
+          const origY = currentOrigY + (avgY - currentOrigY) * blendAmount;
+          
+          const dstIdx = (y * width + x) * 2;
+          tempUMap[dstIdx] = origX;
+          tempUMap[dstIdx + 1] = origY;
+          continue;
+        }
         
         let srcX = x;
         let srcY = y;
@@ -849,6 +882,7 @@ export default function App() {
     { id: 'pinch', icon: Minimize, label: 'Pinch' },
     { id: 'stretch-v', icon: ArrowUpDown, label: 'Stretch Vertically' },
     { id: 'stretch-h', icon: ArrowLeftRight, label: 'Stretch Horizontally' },
+    { id: 'blend', icon: Droplet, label: 'Blend Edges' },
     { id: 'lasso', icon: Lasso, label: 'Lasso Scale' },
     { id: 'pan', icon: Hand, label: 'Pan' },
   ] as const;
