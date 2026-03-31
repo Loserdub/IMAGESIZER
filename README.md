@@ -1,8 +1,12 @@
+<head>
 🖼️ Web-Based Image Tool
 High-fidelity visual manipulation for the modern creative workflow.[1]
+
 Created by Justin Tyler Ray (jray) • jray.me
 👁️ Overview
+
 This is a lightweight, browser-based image editing utility designed for speed and precision.[1] Originally built to streamline the creation of visual assets for audio releases, it provides a "Photoshop-style" experience without the bloat—focusing on rapid resizing, processing, and aesthetic manipulation.[1]
+
 Whether you are prepping cover art, social assets, or UI components, this tool bridges the gap between raw files and production-ready visuals.
 🚀 Key Features
 ⚡ Rapid Processing: Engineered for zero-lag interaction. Perform crops, scales, and adjustments instantly within the browser environment.
@@ -40,3 +44,4 @@ Efficiency by design. Quality by intent. 👑
 Sources
 help
 Justin Ray | AI Music Producer &amp; Hybrid Audio Engineer
+</head>
