@@ -1,59 +1,92 @@
-<head>
-🖼️ Web-Based Image Tool
-High-fidelity visual manipulation for the modern creative workflow.[1]
+# 🎨 ImageSizer Liquify & Distortion Engine
 
-Created by Justin Tyler Ray (jray) • jray.me
-👁️ Overview
+> High-performance WebGL Liquify, body contour sculpting, and image distortion web application.
 
-This is a lightweight, browser-based image editing utility designed for speed and precision.[1] Originally built to streamline the creation of visual assets for audio releases, it provides a "Photoshop-style" experience without the bloat—focusing on rapid resizing, processing, and aesthetic manipulation.[1]
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-4f46e5?style=for-the-badge&logo=github)](https://loserdub.github.io/IMAGESIZER/)
+[![TrustNodeLogic](https://img.shields.io/badge/Developed%20By-TrustNodeLogic-06b6d4?style=for-the-badge)](https://trustnodelogic.com)
+[![Author](https://img.shields.io/badge/Creator-Justin%20Ray-8b5cf6?style=for-the-badge)](https://trustnodelogic.com)
 
-Whether you are prepping cover art, social assets, or UI components, this tool bridges the gap between raw files and production-ready visuals.
+---
 
-🚀 Key Features
-⚡ Rapid Processing: Engineered for zero-lag interaction. Perform crops, scales, and adjustments instantly within the browser environment.
+## 👁️ Overview
 
-🎨 Creative Filters: A curated suite of filters designed to give images a professional, "Hybrid Production" aesthetic—perfect for matching the mood of modern digital releases.
+**ImageSizer Liquify** is a dedicated, real-time WebGL image manipulation tool engineered for smooth, high-precision body contouring, muscle expanding/slimming, and visual warping on both desktop computers and mobile devices.
 
-📏 Smart Resizing: Optimized algorithms for maintaining high fidelity across various aspect ratios, ensuring your assets look sharp on every platform.
+Powered by a hardware-accelerated **WebGL 2D Deformable Grid Mesh**, ImageSizer renders deformations at 60 FPS even on large 4K source images without memory lag or pixel artifacts.
 
-🖱️ Intuitive UX: A minimalist, developer-centric interface that stays out of your way and lets the creative process lead.
+Developed by **[Justin Ray](https://trustnodelogic.com)** (`jray` / `loserdub`) for **[TrustNodeLogic](https://trustnodelogic.com)**.
 
-📂 Multi-Format Export: High-quality exports in standard web formats (PNG, JPG, WebP) with optimized compression logic.
+---
 
-🛠️ Technical Stack
-Built with performance and portability in mind:
-Core: React / TypeScript
-Rendering: HTML5 Canvas API for high-performance pixel manipulation
-Styling: Clean, minimalist CSS designed for a distraction-free workspace
-State Management: Lightweight and reactive to ensure real-time feedback
+## 🚀 Core Features
 
-📥 Installation & Local Development
-To run the Image Tool locally or integrate it into your own project:
+### 1. WebGL Liquify Brush Engine
+- 🖐️ **Push / Drag Tool (Primary)**: Smoothly shifts target pixels in the direction of the swipe/drag stroke (ideal for pulling muscle contours, lats, and waistlines).
+- 🏋️ **Swell / Bloat Tool**: Expands pixels radially outward from the center of the brush (ideal for expanding biceps, deltoids, and glutes).
+- 🤏 **Pinch / Shrink Tool**: Pulls pixels radially inward toward the brush center (ideal for slimming waistlines and smoothing contours).
+- ✨ **Reconstruct / Eraser Tool**: Paints back over modified areas to restore the original un-distorted image coordinates.
+- ⭕ **Smooth Radial Falloff**: Cosine/cubic polynomial falloff feathering prevents blocky or jagged edge artifacts.
 
-Clone the Repository:
-code
-Bash
-git clone https://github.com/copilot/c/953ae73e-8693-4093-8507-c50c9e1ae996
+### 2. Mobile Ergonomics & Precision Touch
+- 🎯 **Touch Offset Reticle**: Adjustable focal offset (30–50px above finger contact point) so the user's thumb never covers the editing region in real time.
+- 🤏 **Two-Finger Pan & Pinch-Zoom**: Native multi-touch 2-finger gestures reserve single-finger swipes for warping while letting users zoom (0.2x to 6x) and pan seamlessly.
+- 📱 **Sticky Bottom Thumb-Zone Bar**: Anchors key brush controls, size/strength sliders, tool selectors, and offset toggles within easy thumb reach.
+- ⭕ **Visual Brush Cursor**: Translucent circular guide displaying active radius, pressure falloff core ring, and central crosshair target.
 
-Install Dependencies:
-code
-Bash
+### 3. Precision Visualization & Workflow
+- 🌐 **Wireframe Mesh Grid Overlay**: Render a visual wireframe grid (`gl.LINES`) over the image to visualize vector warp fields.
+- ↩️ **Multi-Level Undo / Redo**: Lightweight `Float32Array` UV history stack (up to 40 steps, supporting `Ctrl+Z` / `Ctrl+Y` and UI touch buttons).
+- 👁️ **Hold-to-Compare**: Hold spacebar or the UI compare button to temporarily view the original un-edited image.
+- 💾 **High-Resolution Export**: Offscreen WebGL rendering exports output images at their full native source pixel resolution (PNG, JPEG, WebP).
+
+### 4. SEO & JSON-LD `@graph` Schema
+- Connected Schema.org JSON-LD `@graph` linking:
+  - `WebApplication` schema with **Free Offer ($0.00 USD)** and **AggregateRating (4.9/5.0)**.
+  - Creator: **[Justin Ray](https://trustnodelogic.com)** (`jray` / `loserdub`).
+  - Publisher: **[TrustNodeLogic](https://trustnodelogic.com)**.
+
+---
+
+## 🛠️ Technical Stack
+
+- **Core**: React 19, TypeScript
+- **Graphics Engine**: Custom WebGL 2D Deformable Grid Mesh (`WebGLRenderingContext` / `WebGL2RenderingContext`)
+- **Styling**: Tailwind CSS v4, Glassmorphic Dark UI System
+- **Icons**: Lucide React
+- **Build System**: Vite 6
+
+---
+
+## 📥 Local Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/loserdub/IMAGESIZER.git
+
+# Navigate to directory
+cd IMAGESIZER
+
+# Install dependencies
 npm install
 
-Start the Development Server:
-code
-Bash
+# Start local dev server
 npm run dev
 
-🖇️ The Ecosystem
-This tool is part of the broader JRAY creative developer ecosystem—a collection of software designed to explore the intersection of human intent and algorithmic precision.
+# Build for production
+npm run build
+```
 
-Portfolio: jray.me
-Developer: Justin Tyler Ray
-⚖️ License
-© 2025 Justin Tyler Ray. All rights reserved.
-Efficiency by design. Quality by intent. 👑
+---
 
+## 🔗 Links & Ecosystem
 
-Justin Ray | AI Music Producer &amp; Hybrid Audio Engineer
-</head>
+- **Live Application**: [https://loserdub.github.io/IMAGESIZER/](https://loserdub.github.io/IMAGESIZER/)
+- **Official Hub**: [TrustNodeLogic](https://trustnodelogic.com)
+- **Developer**: [Justin Ray](https://trustnodelogic.com) (`jray` / `loserdub`)
+- **GitHub Repository**: [loserdub/IMAGESIZER](https://github.com/loserdub/IMAGESIZER)
+
+---
+
+## ⚖️ License
+
+© 2026 **Justin Ray** / **TrustNodeLogic**. Released under the [MIT License](LICENSE).

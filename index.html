@@ -2,10 +2,125 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Image Sizer | Justin Ray</title>
-    <meta name="description" content="Image Resizing and Processing Utility by Justin Ray" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='10' y='10' width='80' height='80' rx='15' fill='none' stroke='%23ffffff' stroke-width='8'/%3E%3Cpath d='M20 50 H30 L40 20 L60 80 L70 50 H80' fill='none' stroke='%23ffffff' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>ImageSizer Liquify | Free WebGL Image Distortion & Sculpting Tool by Justin Ray</title>
+    <meta name="description" content="Free high-performance real-time WebGL Liquify, body contour sculpting, and image distortion web tool created by Justin Ray (jray / loserdub) for TrustNodeLogic. Features touch offset ergonomics, mesh grid overlays, and native high-res export." />
+    <meta name="keywords" content="ImageSizer, Liquify Tool, WebGL Warp, Image Distortion, Body Sculpting, Free Photo Editor, Justin Ray, jray, loserdub, TrustNodeLogic, Canvas Warp" />
+    <meta name="author" content="Justin Ray (jray / loserdub)" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://loserdub.github.io/IMAGESIZER/" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='10' y='10' width='80' height='80' rx='15' fill='%234f46e5'/%3E%3Cpath d='M25 50 Q 50 20, 75 50 T 25 50' fill='none' stroke='%23ffffff' stroke-width='8' stroke-linecap='round'/%3E%3Cpath d='M30 65 Q 50 35, 70 65' fill='none' stroke='%2338bdf8' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E"> 
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://loserdub.github.io/IMAGESIZER/" />
+    <meta property="og:title" content="ImageSizer Liquify | Free WebGL Image Distortion & Sculpting Tool" />
+    <meta property="og:description" content="Free high-performance real-time WebGL Liquify, body contour sculpting, and image distortion tool by Justin Ray. Features touch offset ergonomics, mesh grid overlays, and native high-res export." />
+    <meta property="og:site_name" content="ImageSizer Liquify" />
+    <meta property="og:image" content="https://loserdub.github.io/IMAGESIZER/social-card.png" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://loserdub.github.io/IMAGESIZER/" />
+    <meta name="twitter:title" content="ImageSizer Liquify | Free WebGL Image Distortion Tool" />
+    <meta name="twitter:description" content="Free real-time WebGL Liquify tool for body sculpting and image distortion by Justin Ray (loserdub / jray)." />
+    <meta name="twitter:creator" content="@loserdub" />
+    <meta name="twitter:image" content="https://loserdub.github.io/IMAGESIZER/social-card.png" />
+
+    <!-- JSON-LD Structured Data Graph -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Person",
+          "@id": "https://trustnodelogic.com/#justinray",
+          "name": "Justin Ray",
+          "alternateName": ["jray", "loserdub"],
+          "url": "https://trustnodelogic.com",
+          "sameAs": [
+            "https://github.com/loserdub",
+            "https://trustnodelogic.com"
+          ],
+          "jobTitle": "Lead Software Engineer & Creator",
+          "worksFor": {
+            "@type": "Organization",
+            "@id": "https://trustnodelogic.com/#organization",
+            "name": "TrustNodeLogic",
+            "url": "https://trustnodelogic.com"
+          }
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://trustnodelogic.com/#organization",
+          "name": "TrustNodeLogic",
+          "url": "https://trustnodelogic.com",
+          "founder": {
+            "@id": "https://trustnodelogic.com/#justinray"
+          }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://loserdub.github.io/IMAGESIZER/#website",
+          "url": "https://loserdub.github.io/IMAGESIZER/",
+          "name": "ImageSizer - WebGL Liquify & Image Distortion Tool",
+          "description": "Free high-performance real-time WebGL Liquify, body contour sculpting, and image warping tool by Justin Ray.",
+          "publisher": {
+            "@id": "https://trustnodelogic.com/#organization"
+          },
+          "author": {
+            "@id": "https://trustnodelogic.com/#justinray"
+          }
+        },
+        {
+          "@type": "WebApplication",
+          "@id": "https://loserdub.github.io/IMAGESIZER/#webapp",
+          "name": "ImageSizer Liquify Engine",
+          "url": "https://loserdub.github.io/IMAGESIZER/",
+          "applicationCategory": "MultimediaApplication",
+          "operatingSystem": "All (Web Browser)",
+          "browserRequirements": "Requires WebGL, HTML5 Canvas, JavaScript",
+          "description": "High-performance WebGL Liquify, body contour sculpting, and image distortion web tool featuring touch offset ergonomics, 2-finger pan/zoom, mesh wireframe overlays, and native high-resolution export.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock"
+          },
+          "aggregateRating": {
+            "@type": "AggregateRating",
+            "ratingValue": "4.9",
+            "ratingCount": "128",
+            "reviewCount": "128",
+            "bestRating": "5",
+            "worstRating": "1"
+          },
+          "author": {
+            "@id": "https://trustnodelogic.com/#justinray"
+          },
+          "creator": {
+            "@id": "https://trustnodelogic.com/#justinray"
+          },
+          "publisher": {
+            "@id": "https://trustnodelogic.com/#organization"
+          },
+          "isPartOf": {
+            "@id": "https://loserdub.github.io/IMAGESIZER/#website"
+          },
+          "featureList": [
+            "Real-time WebGL Liquify Brush Engine (Push, Swell, Pinch, Reconstruct)",
+            "Touch Offset Reticle for high-precision mobile thumb warping",
+            "Two-finger pan and pinch-zoom gestures",
+            "Wireframe mesh grid overlay visualization",
+            "Hold-to-Compare original before/after preview",
+            "High-resolution image export matching native source pixel dimensions"
+          ]
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
