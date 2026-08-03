@@ -20,101 +20,150 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
   onImageLoaded
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
 
   // Viewport Transform (Zoom & Pan)
   const [transform, setTransform] = useState<ViewTransform>({ scale: 1, panX: 0, panY: 0 });
 
-  // Cursor & Reticle position in screen coordinates
-  const [cursorPos, setCursorPos] = useState<{ x: number; y: number; visible: boolean }>({
-    x: -1000,
-    y: -1000,
-    visible: false
-  });
-
-  // Touch Offset Reticle coordinates
-  const [reticlePos, setReticlePos] = useState<{ touchX: number; touchY: number; targetX: number; targetY: number } | null>(null);
-
-  // Interaction tracking
-  const isDraggingRef = useRef(false);
-  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
-  const pinchStartDistRef = useRef<number | null>(null);
-  const pinchStartScaleRef = useRef<number>(1);
-  const pinchStartMidRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Image dimensions
-  const imageDimsRef = useRef<ImageDimensions>({ width: 800, height: 600 });
-
-  // Initialize Liquify Engine
-  useEffect(() => {
-    if (!canvasRef.current) return;
-    const engine = new LiquifyEngine(canvasRef.current);
-    engineRef.current = engine;
-
-    return () => {
-      engineRef.current = null;
-    };
+  // FIX #9: Mirror transform into a ref so event handlers always read the
+  // current value without stale closure capture.
+  const transformRef = useRef<ViewTransform>({ scale: 1, panX: 0, panY: 0 });
+  const syncTransform = useCallback((t: ViewTransform) => {
+    transformRef.current = t;
+    setTransform(t);
   }, []);
 
-  // Load Image into Engine
+  // Cursor & Reticle state
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number; visible: boolean }>({
+    x: -1000, y: -1000, visible: false
+  });
+  const [reticlePos, setReticlePos] = useState<{
+    touchX: number; touchY: number; targetX: number; targetY: number;
+  } | null>(null);
+
+  // Interaction tracking
+  const isDraggingRef      = useRef(false);
+  const lastPointRef       = useRef<{ x: number; y: number } | null>(null);
+  const pinchStartDistRef  = useRef<number | null>(null);
+  const pinchStartScaleRef = useRef<number>(1);
+  const pinchStartMidRef   = useRef<{ x: number; y: number } | null>(null);
+
+  // FIX #8: Track active pointer IDs to reliably detect multi-touch on PointerEvents
+  const activePointerIdsRef = useRef<Set<number>>(new Set());
+
+  // Image dimensions ref (read in event handlers without closure lag)
+  const imageDimsRef = useRef<ImageDimensions>({ width: 800, height: 600 });
+
+  // Settings ref (always current inside event handlers)
+  const settingsRef  = useRef<BrushSettings>(settings);
+  const toolModeRef  = useRef<ToolMode>(toolMode);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => { toolModeRef.current = toolMode; }, [toolMode]);
+
+  // ---------------------------------------------------------------------------
+  // FIX #1: Merge engine init + image load into a single effect.
+  // Previously two separate effects would race on the first render, leaving
+  // engineRef.current === null when the image-load effect fired.
+  // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!engineRef.current || !imageSrc) return;
+    if (!canvasRef.current || !imageSrc) return;
+
+    // Create engine once (or reuse if already exists)
+    if (!engineRef.current) {
+      engineRef.current = new LiquifyEngine(canvasRef.current);
+    }
+
+    const engine = engineRef.current;
 
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      const dims = { width: img.width, height: img.height };
+      if (!canvasRef.current || !containerRef.current) return;
+
+      const dims: ImageDimensions = { width: img.width, height: img.height };
       imageDimsRef.current = dims;
       onImageLoaded(dims);
 
-      if (engineRef.current && canvasRef.current && containerRef.current) {
-        // Size canvas
-        const container = containerRef.current;
-        canvasRef.current.width = container.clientWidth;
-        canvasRef.current.height = container.clientHeight;
+      // FIX #2: Size canvas backing buffer at physical pixels (DPR-aware).
+      // CSS layout stays at 100%/100% via className.
+      const dpr = window.devicePixelRatio || 1;
+      const container = containerRef.current;
+      canvasRef.current.width  = Math.round(container.clientWidth  * dpr);
+      canvasRef.current.height = Math.round(container.clientHeight * dpr);
 
-        engineRef.current.loadImage(img, settings.meshGridSize);
-        fitImageToViewport(dims, container.clientWidth, container.clientHeight);
-        onHistoryChange();
-      }
+      engine.loadImage(img, settingsRef.current.meshGridSize);
+      fitImageToViewport(dims, container.clientWidth, container.clientHeight);
+      onHistoryChange();
+    };
+    img.onerror = () => {
+      console.error('[LiquifyCanvas] Failed to load image:', imageSrc);
     };
     img.src = imageSrc;
-  }, [imageSrc]);
 
-  // Update Mesh Settings in Engine
+    return () => {
+      // On unmount, clear the engine reference (don't destroy — parent manages lifetime)
+      engineRef.current = null;
+    };
+  }, [imageSrc]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep mesh overlay in sync with settings
   useEffect(() => {
     if (engineRef.current) {
-      engineRef.current.setMeshOverlay(settings.meshOverlay, settings.meshOpacity, settings.meshColor);
+      engineRef.current.setMeshOverlay(
+        settings.meshOverlay,
+        settings.meshOpacity,
+        settings.meshColor
+      );
     }
   }, [settings.meshOverlay, settings.meshOpacity, settings.meshColor]);
 
-  // Update Grid Size
+  // Keep grid size in sync with settings
   useEffect(() => {
     if (engineRef.current) {
       engineRef.current.setGridSize(settings.meshGridSize);
     }
   }, [settings.meshGridSize]);
 
-  // Fit Image inside container
-  const fitImageToViewport = (dims: ImageDimensions, containerW: number, containerH: number) => {
-    const padding = 40;
-    const scaleX = (containerW - padding) / dims.width;
-    const scaleY = (containerH - padding) / dims.height;
-    const scale = Math.min(scaleX, scaleY, 1.5);
+  // ---------------------------------------------------------------------------
+  // FIX #10: Passive wheel listener — attach via useEffect with { passive: false }
+  // so e.preventDefault() actually works and the page doesn't scroll.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
 
-    const panX = (containerW - dims.width * scale) / 2;
-    const panY = (containerH - dims.height * scale) / 2;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
 
-    setTransform({ scale, panX, panY });
-  };
+      const t = transformRef.current;
+      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newScale   = Math.max(0.2, Math.min(6, t.scale * zoomFactor));
 
-  // Resize Listener
+      // FIX #3: Use container-relative coordinates for zoom pivot.
+      // e.clientX/Y is viewport-relative; subtract the container's bounding rect
+      // so the pivot is correct regardless of header height or sidebar width.
+      const rect  = el.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const newPanX = mouseX - (mouseX - t.panX) * (newScale / t.scale);
+      const newPanY = mouseY - (mouseY - t.panY) * (newScale / t.scale);
+
+      syncTransform({ scale: newScale, panX: newPanX, panY: newPanY });
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [syncTransform]);
+
+  // Resize listener — re-size canvas backing buffer on window resize
   useEffect(() => {
     const handleResize = () => {
       if (!containerRef.current || !canvasRef.current || !engineRef.current) return;
-      const w = containerRef.current.clientWidth;
-      const h = containerRef.current.clientHeight;
-      canvasRef.current.width = w;
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.round(containerRef.current.clientWidth  * dpr);
+      const h = Math.round(containerRef.current.clientHeight * dpr);
+      canvasRef.current.width  = w;
       canvasRef.current.height = h;
       engineRef.current.render();
     };
@@ -123,78 +172,94 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Screen to Image Normalized Coordinates
-  const screenToNormImage = (screenX: number, screenY: number) => {
-    const imgW = imageDimsRef.current.width * transform.scale;
-    const imgH = imageDimsRef.current.height * transform.scale;
+  // ---------------------------------------------------------------------------
+  // Coordinate helpers — read from refs to avoid stale closures (FIX #9)
+  // ---------------------------------------------------------------------------
 
-    const normX = (screenX - transform.panX) / imgW;
-    const normY = (screenY - transform.panY) / imgH;
+  const screenToNormImage = useCallback((screenX: number, screenY: number) => {
+    const t    = transformRef.current;
+    const dims = imageDimsRef.current;
+    const imgW = dims.width  * t.scale;
+    const imgH = dims.height * t.scale;
+    return {
+      normX: (screenX - t.panX) / imgW,
+      normY: (screenY - t.panY) / imgH
+    };
+  }, []);
 
-    return { normX, normY };
+  const screenRadiusToNorm = useCallback((screenRadius: number) => {
+    const t    = transformRef.current;
+    const dims = imageDimsRef.current;
+    return screenRadius / (dims.height * t.scale);
+  }, []);
+
+  const fitImageToViewport = (dims: ImageDimensions, containerW: number, containerH: number) => {
+    const padding = 40;
+    const scaleX  = (containerW - padding) / dims.width;
+    const scaleY  = (containerH - padding) / dims.height;
+    const scale   = Math.min(scaleX, scaleY, 1.5);
+    const panX    = (containerW - dims.width  * scale) / 2;
+    const panY    = (containerH - dims.height * scale) / 2;
+    syncTransform({ scale, panX, panY });
   };
 
-  // Convert Screen brush radius to normalized image radius
-  const screenRadiusToNorm = (screenRadius: number) => {
-    const imgH = imageDimsRef.current.height * transform.scale;
-    return screenRadius / imgH;
-  };
+  // ---------------------------------------------------------------------------
+  // Pointer Events
+  // ---------------------------------------------------------------------------
 
-  // Pointer Down
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.pointerType === 'touch' && (e as any).targetTouches?.length > 1) return;
+    // FIX #8: Register this pointer ID so we can detect multi-touch reliably
+    activePointerIdsRef.current.add(e.pointerId);
+
+    // If two or more touch pointers are active, do not start/continue a warp stroke
+    if (e.pointerType === 'touch' && activePointerIdsRef.current.size > 1) {
+      // Cancel any in-progress stroke when the second finger lands
+      isDraggingRef.current = false;
+      lastPointRef.current  = null;
+      return;
+    }
 
     isDraggingRef.current = true;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
-    let screenX = e.clientX;
-    let screenY = e.clientY;
+    // Container-relative coords (consistent with zoom pivot fix #3)
+    const rect = containerRef.current?.getBoundingClientRect();
+    let screenX = e.clientX - (rect?.left ?? 0);
+    let screenY = e.clientY - (rect?.top  ?? 0);
 
-    if (e.pointerType === 'touch' && settings.enableOffset) {
-      screenY -= settings.touchOffset;
-      setReticlePos({
-        touchX: e.clientX,
-        touchY: e.clientY,
-        targetX: screenX,
-        targetY: screenY
-      });
+    const s = settingsRef.current;
+    if (e.pointerType === 'touch' && s.enableOffset) {
+      const offsetY = screenY - s.touchOffset;
+      setReticlePos({ touchX: screenX, touchY: screenY, targetX: screenX, targetY: offsetY });
+      screenY = offsetY;
     }
 
     lastPointRef.current = { x: screenX, y: screenY };
 
-    if (toolMode !== 'pan' && engineRef.current) {
-      const { normX, normY } = screenToNormImage(screenX, screenY);
-      const normRadius = screenRadiusToNorm(settings.size / 2);
-
-      engineRef.current.applyWarp(
-        normX,
-        normY,
-        0,
-        0,
-        normRadius,
-        settings.strength,
-        toolMode
-      );
+    const mode = toolModeRef.current;
+    if (mode !== 'pan' && engineRef.current) {
+      const { normX, normY }   = screenToNormImage(screenX, screenY);
+      const normRadius         = screenRadiusToNorm(s.size / 2);
+      engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength, mode);
     }
   };
 
-  // Pointer Move
   const handlePointerMove = (e: React.PointerEvent) => {
-    let screenX = e.clientX;
-    let screenY = e.clientY;
+    // FIX #8: Ignore move events from non-primary touch pointers during multi-touch
+    if (e.pointerType === 'touch' && activePointerIdsRef.current.size > 1) return;
 
+    const rect = containerRef.current?.getBoundingClientRect();
+    let screenX = e.clientX - (rect?.left ?? 0);
+    let screenY = e.clientY - (rect?.top  ?? 0);
+
+    const s       = settingsRef.current;
     const isTouch = e.pointerType === 'touch';
 
-    if (isTouch && settings.enableOffset) {
-      const targetY = screenY - settings.touchOffset;
-      setReticlePos({
-        touchX: screenX,
-        touchY: screenY,
-        targetX: screenX,
-        targetY: targetY
-      });
-      setCursorPos({ x: screenX, y: targetY, visible: true });
-      screenY = targetY;
+    if (isTouch && s.enableOffset) {
+      const offsetY = screenY - s.touchOffset;
+      setReticlePos({ touchX: screenX, touchY: screenY, targetX: screenX, targetY: offsetY });
+      setCursorPos({ x: screenX, y: offsetY, visible: true });
+      screenY = offsetY;
     } else {
       setReticlePos(null);
       setCursorPos({ x: screenX, y: screenY, visible: true });
@@ -204,87 +269,87 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
 
     const dx = screenX - lastPointRef.current.x;
     const dy = screenY - lastPointRef.current.y;
+    const mode = toolModeRef.current;
 
-    if (toolMode === 'pan') {
-      setTransform(prev => ({
-        ...prev,
-        panX: prev.panX + dx,
-        panY: prev.panY + dy
-      }));
+    if (mode === 'pan') {
+      const t = transformRef.current;
+      syncTransform({ ...t, panX: t.panX + dx, panY: t.panY + dy });
     } else if (engineRef.current) {
+      const t = transformRef.current;
+      const dims = imageDimsRef.current;
       const { normX, normY } = screenToNormImage(screenX, screenY);
-      const imgW = imageDimsRef.current.width * transform.scale;
-      const imgH = imageDimsRef.current.height * transform.scale;
-
-      const normDragX = dx / imgW;
-      const normDragY = dy / imgH;
-      const normRadius = screenRadiusToNorm(settings.size / 2);
-
-      engineRef.current.applyWarp(
-        normX,
-        normY,
-        normDragX,
-        normDragY,
-        normRadius,
-        settings.strength,
-        toolMode
-      );
+      const normDragX  = dx / (dims.width  * t.scale);
+      const normDragY  = dy / (dims.height * t.scale);
+      const normRadius = screenRadiusToNorm(s.size / 2);
+      engineRef.current.applyWarp(normX, normY, normDragX, normDragY, normRadius, s.strength, mode);
     }
 
     lastPointRef.current = { x: screenX, y: screenY };
   };
 
-  // Pointer Up / Cancel
   const handlePointerUp = (e: React.PointerEvent) => {
+    // FIX #8: Unregister this pointer ID
+    activePointerIdsRef.current.delete(e.pointerId);
+
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
-    lastPointRef.current = null;
+    lastPointRef.current  = null;
     setReticlePos(null);
 
-    if (toolMode !== 'pan' && engineRef.current) {
+    const mode = toolModeRef.current;
+    if (mode !== 'pan' && engineRef.current) {
       engineRef.current.saveHistoryState();
       onHistoryChange();
     }
   };
 
-  // Multi-Touch (2-finger Pinch Zoom & Pan)
+  // ---------------------------------------------------------------------------
+  // Multi-Touch Pinch Zoom & Pan (TouchEvents)
+  // ---------------------------------------------------------------------------
+
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
+      // Cancel any active warp stroke when second finger appears
       isDraggingRef.current = false;
+      lastPointRef.current  = null;
+
       const t1 = e.touches[0];
       const t2 = e.touches[1];
+      const rect = containerRef.current?.getBoundingClientRect();
+      const ox = rect?.left ?? 0;
+      const oy = rect?.top  ?? 0;
 
       const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      pinchStartDistRef.current = dist;
-      pinchStartScaleRef.current = transform.scale;
-      pinchStartMidRef.current = {
-        x: (t1.clientX + t2.clientX) / 2,
-        y: (t1.clientY + t2.clientY) / 2
+      pinchStartDistRef.current  = dist;
+      pinchStartScaleRef.current = transformRef.current.scale;
+      pinchStartMidRef.current   = {
+        x: (t1.clientX + t2.clientX) / 2 - ox,
+        y: (t1.clientY + t2.clientY) / 2 - oy
       };
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (e.touches.length === 2 && pinchStartDistRef.current && pinchStartMidRef.current) {
+      e.preventDefault(); // Prevent native browser pan during pinch
       const t1 = e.touches[0];
       const t2 = e.touches[1];
+      const rect = containerRef.current?.getBoundingClientRect();
+      const ox = rect?.left ?? 0;
+      const oy = rect?.top  ?? 0;
 
-      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const dist        = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
       const scaleFactor = dist / pinchStartDistRef.current;
+      const newScale    = Math.max(0.2, Math.min(6, pinchStartScaleRef.current * scaleFactor));
 
-      const newScale = Math.max(0.2, Math.min(6, pinchStartScaleRef.current * scaleFactor));
-
-      const midX = (t1.clientX + t2.clientX) / 2;
-      const midY = (t1.clientY + t2.clientY) / 2;
+      const midX = (t1.clientX + t2.clientX) / 2 - ox;
+      const midY = (t1.clientY + t2.clientY) / 2 - oy;
 
       const dx = midX - pinchStartMidRef.current.x;
       const dy = midY - pinchStartMidRef.current.y;
+      const t  = transformRef.current;
 
-      setTransform(prev => ({
-        scale: newScale,
-        panX: prev.panX + dx,
-        panY: prev.panY + dy
-      }));
+      syncTransform({ scale: newScale, panX: t.panX + dx, panY: t.panY + dy });
 
       pinchStartMidRef.current = { x: midX, y: midY };
     }
@@ -292,39 +357,23 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
 
   const handleTouchEnd = () => {
     pinchStartDistRef.current = null;
-    pinchStartMidRef.current = null;
+    pinchStartMidRef.current  = null;
   };
 
-  // Mouse Wheel Zoom
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const newScale = Math.max(0.2, Math.min(6, transform.scale * zoomFactor));
-
-    const mouseX = e.clientX;
-    const mouseY = e.clientY;
-
-    const newPanX = mouseX - (mouseX - transform.panX) * (newScale / transform.scale);
-    const newPanY = mouseY - (mouseY - transform.panY) * (newScale / transform.scale);
-
-    setTransform({
-      scale: newScale,
-      panX: newPanX,
-      panY: newPanY
-    });
-  };
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
     <div
       ref={containerRef}
-      onWheel={handleWheel}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onPointerLeave={() => setCursorPos(prev => ({ ...prev, visible: false }))}
       className="relative w-full h-full bg-slate-950 overflow-hidden select-none touch-none cursor-crosshair"
     >
-      {/* WebGL Canvas */}
+      {/* WebGL Canvas — CSS fills container, backing buffer is DPR-scaled (FIX #2) */}
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
@@ -332,10 +381,12 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         style={{
+          width: '100%',
+          height: '100%',
           transform: `translate3d(${transform.panX}px, ${transform.panY}px, 0px) scale(${transform.scale})`,
           transformOrigin: '0 0'
         }}
-        className="absolute top-0 left-0 w-full h-full"
+        className="absolute top-0 left-0"
       />
 
       {/* Visual Brush Cursor Ring */}
@@ -343,30 +394,25 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
         <div
           style={{
             left: `${cursorPos.x}px`,
-            top: `${cursorPos.y}px`,
-            width: `${settings.size}px`,
+            top:  `${cursorPos.y}px`,
+            width:  `${settings.size}px`,
             height: `${settings.size}px`
           }}
-          className="pointer-events-none fixed -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-indigo-400/80 bg-indigo-500/10 shadow-lg shadow-indigo-500/20 z-20 flex items-center justify-center transition-all duration-75"
+          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-indigo-400/80 bg-indigo-500/10 shadow-lg shadow-indigo-500/20 z-20 flex items-center justify-center transition-[width,height] duration-75"
         >
-          {/* Inner Falloff Pressure Ring */}
+          {/* Inner falloff pressure ring */}
           <div
-            style={{
-              width: `${settings.size * 0.4}px`,
-              height: `${settings.size * 0.4}px`
-            }}
+            style={{ width: `${settings.size * 0.4}px`, height: `${settings.size * 0.4}px` }}
             className="rounded-full border border-indigo-300/40 bg-indigo-400/5"
           />
-
-          {/* Center Focal Crosshair Dot */}
+          {/* Center focal dot */}
           <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full absolute shadow-sm" />
         </div>
       )}
 
-      {/* Touch Offset Reticle Visual Connector */}
+      {/* Touch Offset Reticle — dotted line from finger to offset target */}
       {reticlePos && (
-        <svg className="fixed inset-0 pointer-events-none z-20 w-full h-full">
-          {/* Dotted line from touch contact point to offset target */}
+        <svg className="absolute inset-0 pointer-events-none z-20 w-full h-full">
           <line
             x1={reticlePos.touchX}
             y1={reticlePos.touchY}
@@ -376,7 +422,6 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
             strokeWidth="2"
             strokeDasharray="4 4"
           />
-          {/* Touch Contact Dot */}
           <circle
             cx={reticlePos.touchX}
             cy={reticlePos.touchY}
