@@ -25,7 +25,10 @@ export default function App() {
     meshOverlay: false,
     meshGridSize: 120,
     meshOpacity: 0.5,
-    meshColor: '#3b82f6'
+    meshColor: '#3b82f6',
+    showMask: true,
+    maskOpacity: 0.35,
+    maskColor: '#ef4444'
   });
 
   // History & Compare State
@@ -108,6 +111,24 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const handleClearMask = () => {
+    if (engineRef.current) {
+      engineRef.current.clearMask();
+      updateHistoryState();
+    }
+  };
+
+  // Keep mask overlay in sync with settings
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.setMaskOverlay(
+        settings.showMask,
+        settings.maskOpacity,
+        settings.maskColor
+      );
+    }
+  }, [settings.showMask, settings.maskOpacity, settings.maskColor]);
+
   // Keyboard Shortcuts Listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -128,6 +149,8 @@ export default function App() {
       else if (e.key === '3') setToolMode('pinch');
       else if (e.key === '4') setToolMode('reconstruct');
       else if (e.key === '5') setToolMode('pan');
+      else if (e.key === '6') setToolMode('freeze');
+      else if (e.key === '7') setToolMode('thaw');
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -193,6 +216,7 @@ export default function App() {
         onSelectTool={setToolMode}
         settings={settings}
         onUpdateSettings={(partial) => setSettings(s => ({ ...s, ...partial }))}
+        onClearMask={handleClearMask}
       />
 
       {/* High Resolution Export Modal */}

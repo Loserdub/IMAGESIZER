@@ -1,15 +1,14 @@
 import React from 'react';
 import { 
   Move, 
-  CircleDot, 
-  Target, 
-  RotateCcw, 
   Hand, 
-  Sliders, 
   Crosshair, 
   Sparkles,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Shield,
+  ShieldOff,
+  Trash2
 } from 'lucide-react';
 import { ToolMode, BrushSettings } from '../types/liquify';
 
@@ -18,43 +17,57 @@ interface BottomControlBarProps {
   onSelectTool: (mode: ToolMode) => void;
   settings: BrushSettings;
   onUpdateSettings: (partial: Partial<BrushSettings>) => void;
+  onClearMask?: () => void;
 }
 
 export const BottomControlBar: React.FC<BottomControlBarProps> = ({
   toolMode,
   onSelectTool,
   settings,
-  onUpdateSettings
+  onUpdateSettings,
+  onClearMask
 }) => {
   const tools: { id: ToolMode; label: string; icon: React.ReactNode; desc: string }[] = [
     { 
       id: 'push', 
       label: 'Push / Drag', 
-      icon: <Move className="w-5 h-5" />, 
+      icon: <Move className="w-4 h-4" />, 
       desc: 'Moves pixels smoothly in swipe direction' 
     },
     { 
       id: 'swell', 
-      label: 'Swell / Bloat', 
-      icon: <Maximize2 className="w-5 h-5" />, 
+      label: 'Swell', 
+      icon: <Maximize2 className="w-4 h-4" />, 
       desc: 'Expands pixels outward from center' 
     },
     { 
       id: 'pinch', 
-      label: 'Pinch / Shrink', 
-      icon: <Minimize2 className="w-5 h-5" />, 
+      label: 'Pinch', 
+      icon: <Minimize2 className="w-4 h-4" />, 
       desc: 'Pulls pixels inward toward center' 
     },
     { 
       id: 'reconstruct', 
       label: 'Reconstruct', 
-      icon: <Sparkles className="w-5 h-5" />, 
+      icon: <Sparkles className="w-4 h-4" />, 
       desc: 'Paints back original un-distorted image' 
+    },
+    { 
+      id: 'freeze', 
+      label: 'Freeze Mask', 
+      icon: <Shield className="w-4 h-4 text-rose-400" />, 
+      desc: 'Paints red protection layer to lock vertices in place' 
+    },
+    { 
+      id: 'thaw', 
+      label: 'Thaw Mask', 
+      icon: <ShieldOff className="w-4 h-4 text-amber-400" />, 
+      desc: 'Erases protection layer to unlock vertices' 
     },
     { 
       id: 'pan', 
       label: 'Pan & Zoom', 
-      icon: <Hand className="w-5 h-5" />, 
+      icon: <Hand className="w-4 h-4" />, 
       desc: 'Navigate canvas view' 
     }
   ];
@@ -129,8 +142,19 @@ export const BottomControlBar: React.FC<BottomControlBarProps> = ({
             })}
           </div>
 
-          {/* Touch Offset Reticle Toggle */}
+          {/* Touch Offset Reticle & Mask Controls */}
           <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
+            {onClearMask && (
+              <button
+                onClick={onClearMask}
+                title="Clear all freeze mask protection weights"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Clear Mask</span>
+              </button>
+            )}
+
             <button
               onClick={() => onUpdateSettings({ enableOffset: !settings.enableOffset })}
               title="Touch Offset: Places brush focal point above finger so thumb does not cover the editing area."

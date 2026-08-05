@@ -1,102 +1,112 @@
 import { SampleImage } from '../types/liquify';
 
-// High-quality SVG data URIs for sample images (Fitness Bicep model, Portrait silhouette, Abstract grid)
-// These allow immediate testing without requiring external network requests.
-
-const createFitnessSample = (): string => {
+/**
+ * Generate high-resolution canvas sample image for Trust Node Logic
+ */
+const createTrustNodeLogicSample = (): string => {
   const canvas = document.createElement('canvas');
-  canvas.width = 1200;
-  canvas.height = 1600;
+  canvas.width = 1600;
+  canvas.height = 1000;
   const ctx = canvas.getContext('2d')!;
 
-  // Dark studio background
-  const bgGrad = ctx.createRadialGradient(600, 800, 100, 600, 800, 1000);
-  bgGrad.addColorStop(0, '#1e293b');
-  bgGrad.addColorStop(0.6, '#0f172a');
+  // Deep dark modern studio background gradient
+  const bgGrad = ctx.createRadialGradient(800, 500, 100, 800, 500, 1000);
+  bgGrad.addColorStop(0, '#0f172a');
+  bgGrad.addColorStop(0.5, '#090d16');
   bgGrad.addColorStop(1, '#020617');
   ctx.fillStyle = bgGrad;
-  ctx.fillRect(0, 0, 1200, 1600);
+  ctx.fillRect(0, 0, 1600, 1000);
 
-  // Soft rim lighting
-  ctx.save();
-  const rimGrad = ctx.createLinearGradient(0, 0, 1200, 0);
-  rimGrad.addColorStop(0, 'rgba(56, 189, 248, 0.15)');
-  rimGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
-  rimGrad.addColorStop(1, 'rgba(168, 85, 247, 0.15)');
-  ctx.fillStyle = rimGrad;
-  ctx.fillRect(0, 0, 1200, 1600);
-  ctx.restore();
-
-  // Torso / Arm Silhouette & Contour Model
-  // Shoulder / Deltoid
-  ctx.beginPath();
-  ctx.fillStyle = '#e2e8f0';
-  
-  // Chest and arm silhouette
-  ctx.moveTo(350, 1600);
-  ctx.lineTo(350, 1100);
-  // Waist curve
-  ctx.bezierCurveTo(370, 950, 420, 850, 400, 700); // Waist to ribs
-  ctx.bezierCurveTo(390, 600, 320, 500, 250, 450); // Lats to shoulder
-  ctx.bezierCurveTo(230, 350, 280, 250, 400, 200); // Traps/neck
-  ctx.bezierCurveTo(550, 160, 650, 160, 800, 200); // Neck to right shoulder
-  // Right Arm (Bicep/Deltoid focus)
-  ctx.bezierCurveTo(920, 240, 1050, 350, 1020, 520); // Delt bulge
-  ctx.bezierCurveTo(1000, 620, 960, 720, 930, 820);  // Bicep / Tricep contour
-  ctx.bezierCurveTo(900, 920, 880, 1050, 870, 1600); // Forearm down
-  ctx.closePath();
-
-  // Gradient fill for body model
-  const bodyGrad = ctx.createLinearGradient(300, 200, 900, 1200);
-  bodyGrad.addColorStop(0, '#f8fafc');
-  bodyGrad.addColorStop(0.3, '#cbd5e1');
-  bodyGrad.addColorStop(0.7, '#64748b');
-  bodyGrad.addColorStop(1, '#334155');
-  ctx.fillStyle = bodyGrad;
-  ctx.fill();
-
-  // Muscle definition shading
-  ctx.lineWidth = 12;
-  ctx.strokeStyle = 'rgba(15, 23, 42, 0.35)';
-  ctx.lineCap = 'round';
-
-  // Bicep contour line
-  ctx.beginPath();
-  ctx.moveTo(850, 450);
-  ctx.bezierCurveTo(920, 520, 910, 650, 840, 720);
-  ctx.stroke();
-
-  // Deltoid cap contour
-  ctx.beginPath();
-  ctx.moveTo(800, 220);
-  ctx.bezierCurveTo(900, 300, 940, 400, 860, 460);
-  ctx.stroke();
-
-  // Abdominal grid lines for waist / core distortion testing
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = 'rgba(30, 41, 59, 0.3)';
-  for (let y = 650; y <= 1100; y += 120) {
+  // Tech grid lines for warp visual feedback
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(99, 102, 241, 0.15)';
+  const gridSize = 50;
+  for (let x = 0; x <= 1600; x += gridSize) {
     ctx.beginPath();
-    ctx.moveTo(500, y);
-    ctx.quadraticCurveTo(600, y + 25, 700, y);
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, 1000);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= 1000; y += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(1600, y);
     ctx.stroke();
   }
 
-  // Vertical abs center line
-  ctx.beginPath();
-  ctx.moveTo(600, 550);
-  ctx.lineTo(600, 1150);
-  ctx.stroke();
+  // Glowing center ambient halo
+  const glowGrad = ctx.createRadialGradient(800, 500, 50, 800, 500, 450);
+  glowGrad.addColorStop(0, 'rgba(99, 102, 241, 0.25)');
+  glowGrad.addColorStop(0.6, 'rgba(139, 92, 246, 0.08)');
+  glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = glowGrad;
+  ctx.fillRect(0, 0, 1600, 1000);
 
-  // Reference grid overlay background dots
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-  for (let x = 50; x < 1200; x += 100) {
-    for (let y = 50; y < 1600; y += 100) {
-      ctx.beginPath();
-      ctx.arc(x, y, 3, 0, Math.PI * 2);
-      ctx.fill();
+  // Connected Node network background
+  const nodes = [
+    { x: 300, y: 250 }, { x: 500, y: 200 }, { x: 800, y: 180 }, { x: 1100, y: 200 }, { x: 1300, y: 250 },
+    { x: 250, y: 500 }, { x: 1350, y: 500 },
+    { x: 300, y: 750 }, { x: 500, y: 800 }, { x: 800, y: 820 }, { x: 1100, y: 800 }, { x: 1300, y: 750 }
+  ];
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(168, 85, 247, 0.3)';
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const dx = nodes[i].x - nodes[j].x;
+      const dy = nodes[i].y - nodes[j].y;
+      if (Math.hypot(dx, dy) < 400) {
+        ctx.beginPath();
+        ctx.moveTo(nodes[i].x, nodes[i].y);
+        ctx.lineTo(nodes[j].x, nodes[j].y);
+        ctx.stroke();
+      }
     }
   }
+
+  for (const n of nodes) {
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#818cf8';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#c084fc';
+    ctx.stroke();
+  }
+
+  // Text alignment setup
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Subtitle / Tagline above
+  ctx.font = '600 22px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  ctx.fillStyle = '#38bdf8';
+  ctx.fillText('HPS-1.0 ATTESTATION ENGINE', 800, 400);
+
+  // Text gradient for TRUST NODE LOGIC
+  ctx.font = '900 92px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  const textGrad = ctx.createLinearGradient(200, 0, 1400, 0);
+  textGrad.addColorStop(0, '#ffffff');
+  textGrad.addColorStop(0.3, '#e0e7ff');
+  textGrad.addColorStop(0.7, '#818cf8');
+  textGrad.addColorStop(1, '#c084fc');
+  ctx.fillStyle = textGrad;
+
+  // Subtle text glow & shadow
+  ctx.shadowColor = 'rgba(99, 102, 241, 0.6)';
+  ctx.shadowBlur = 30;
+  ctx.shadowOffsetY = 4;
+  ctx.fillText('TRUST NODE LOGIC', 800, 500);
+
+  // Reset shadow
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  // Subtitle below
+  ctx.font = '500 20px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('REAL-TIME WEBGL LIQUIFY & WARP DISTORTION ENGINE', 800, 580);
 
   return canvas.toDataURL('image/png');
 };
@@ -138,10 +148,10 @@ const createGridSample = (): string => {
 export const getSampleImages = (): SampleImage[] => {
   return [
     {
-      id: 'fitness-model',
-      name: 'Fitness Contour Model',
-      url: createFitnessSample(),
-      description: 'Ideal for testing muscle expansion (biceps/delts) and waist slimming.'
+      id: 'trust-node-logic',
+      name: 'Trust Node Logic',
+      url: createTrustNodeLogicSample(),
+      description: 'Official Trust Node Logic typography & node grid model.'
     },
     {
       id: 'calibration-grid',

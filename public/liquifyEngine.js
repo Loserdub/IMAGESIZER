@@ -25,15 +25,17 @@ export class LiquifyEngine {
     this.numVertices = 0;
 
     // CPU-side arrays
-    this.positions = new Float32Array(0);  // Clip-space [-1, 1]
-    this.baseUVs = new Float32Array(0);    // Normalized base [0, 1]
-    this.currentUVs = new Float32Array(0); // Deformed texture coords
+    this.positions = new Float32Array(0);   // Clip-space [-1, 1]
+    this.baseUVs = new Float32Array(0);     // Normalized base [0, 1]
+    this.currentUVs = new Float32Array(0);  // Deformed texture coords
+    this.maskWeights = new Float32Array(0); // Protection mask [0.0 = free, 1.0 = locked]
 
     // GPU Buffers
     this.vertexBuffer = null;
     this.texCoordBuffer = null;
     this.baseUVBuffer = null;
     this.compareBuffer = null;
+    this.maskBuffer = null;
     this.indexBuffer = null;
     this.wireframeIndexBuffer = null;
 
@@ -43,6 +45,7 @@ export class LiquifyEngine {
     // Shader Programs
     this.imageProgram = null;
     this.wireframeProgram = null;
+    this.maskProgram = null;
 
     // Attribute & Uniform locations
     this.aPositionLoc = -1;
@@ -54,11 +57,21 @@ export class LiquifyEngine {
     this.aWireframeBaseUVLoc = -1;
     this.uWireframeColorLoc = null;
 
+    this.aMaskPosLoc = -1;
+    this.aMaskTexCoordLoc = -1;
+    this.aMaskBaseUVLoc = -1;
+    this.aMaskWeightLoc = -1;
+    this.uMaskColorLoc = null;
+
     // Overlay & Compare State
     this.isComparing = false;
     this.showMeshOverlay = false;
     this.meshOpacity = 0.5;
     this.meshColor = '#3b82f6';
+
+    this.showMaskOverlay = true;
+    this.maskOpacity = 0.35;
+    this.maskColor = '#ef4444';
 
     // History stack
     this.history = [];
@@ -141,6 +154,40 @@ export class LiquifyEngine {
       this.aWireframeBaseUVLoc = gl.getAttribLocation(this.wireframeProgram, 'a_baseUV');
       this.uWireframeColorLoc = gl.getUniformLocation(this.wireframeProgram, 'u_color');
     }
+
+    // --- Mask Overlay Shader ---
+    const vsMask = `
+      attribute vec2 a_position;
+      attribute vec2 a_texCoord;
+      attribute vec2 a_baseUV;
+      attribute float a_maskWeight;
+      varying float v_maskWeight;
+      void main() {
+        vec2 uvDelta = a_baseUV - a_texCoord;
+        vec2 clipDelta = vec2(uvDelta.x * 2.0, -uvDelta.y * 2.0);
+        gl_Position = vec4(a_position + clipDelta, -0.05, 1.0);
+        v_maskWeight = a_maskWeight;
+      }
+    `;
+
+    const fsMask = `
+      precision mediump float;
+      uniform vec4 u_color;
+      varying float v_maskWeight;
+      void main() {
+        if (v_maskWeight <= 0.001) discard;
+        gl_FragColor = vec4(u_color.rgb, u_color.a * v_maskWeight);
+      }
+    `;
+
+    this.maskProgram = this._createProgram(vsMask, fsMask);
+    if (this.maskProgram) {
+      this.aMaskPosLoc = gl.getAttribLocation(this.maskProgram, 'a_position');
+      this.aMaskTexCoordLoc = gl.getAttribLocation(this.maskProgram, 'a_texCoord');
+      this.aMaskBaseUVLoc = gl.getAttribLocation(this.maskProgram, 'a_baseUV');
+      this.aMaskWeightLoc = gl.getAttribLocation(this.maskProgram, 'a_maskWeight');
+      this.uMaskColorLoc = gl.getUniformLocation(this.maskProgram, 'u_color');
+    }
   }
 
   _createProgram(vsCode, fsCode) {
@@ -180,11 +227,6 @@ export class LiquifyEngine {
     return prog;
   }
 
-  /**
-   * Load an image source and build vertex grid
-   * @param {HTMLImageElement|ImageBitmap} image
-   * @param {number} gridSize
-   */
   loadImage(image, gridSize = 120) {
     const gl = this.gl;
     if (!gl) return;
@@ -227,6 +269,7 @@ export class LiquifyEngine {
     this.positions = new Float32Array(this.numVertices * 2);
     this.baseUVs = new Float32Array(this.numVertices * 2);
     this.currentUVs = new Float32Array(this.numVertices * 2);
+    this.maskWeights = new Float32Array(this.numVertices);
 
     let idx = 0;
     for (let r = 0; r <= rows; r++) {
@@ -305,6 +348,11 @@ export class LiquifyEngine {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.compareBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.baseUVs, gl.STATIC_DRAW);
 
+    this._safeDeleteBuffer('maskBuffer');
+    this.maskBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, this.maskWeights, gl.DYNAMIC_DRAW);
+
     this._safeDeleteBuffer('indexBuffer');
     this.indexBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
@@ -330,19 +378,39 @@ export class LiquifyEngine {
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.currentUVs);
   }
 
-  /**
-   * Apply Liquify Warp algorithms
-   */
+  _updateMaskBuffer() {
+    const gl = this.gl;
+    if (!gl || !this.maskBuffer) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.maskWeights);
+  }
+
+  clearMask() {
+    this.maskWeights.fill(0);
+    this._updateMaskBuffer();
+    this.saveHistoryState();
+    this.render();
+  }
+
+  setMaskOverlay(enabled, opacity = 0.35, color = '#ef4444') {
+    this.showMaskOverlay = enabled;
+    this.maskOpacity = opacity;
+    this.maskColor = color;
+    this.render();
+  }
+
   applyWarp(normX, normY, normDragX, normDragY, normRadius, strength, mode) {
     if (!this.originalImage || mode === 'pan') return;
 
     const numVerts = this.numVertices;
     const current = this.currentUVs;
     const base = this.baseUVs;
+    const masks = this.maskWeights;
     const r2 = normRadius * normRadius;
     if (r2 <= 0) return;
 
     const aspect = this.imageWidth / this.imageHeight;
+    let isMaskModified = false;
 
     for (let i = 0; i < numVerts; i++) {
       const idx = i * 2;
@@ -359,35 +427,51 @@ export class LiquifyEngine {
         const falloff = (1.0 - normDist * normDist) * (1.0 - normDist * normDist);
         const factor = falloff * strength;
 
-        if (mode === 'push') {
-          current[idx] -= normDragX * factor;
-          current[idx + 1] -= normDragY * factor;
-        } else if (mode === 'swell') {
-          if (dist > 0.00001) {
-            const invDist = 1.0 / dist;
-            const dirU = (du / aspect) * invDist;
-            const dirV = dv * invDist;
-            current[idx] -= dirU * normRadius * factor * 0.25;
-            current[idx + 1] -= dirV * normRadius * factor * 0.25;
+        if (mode === 'freeze') {
+          masks[i] = Math.min(1.0, masks[i] + factor * 1.5);
+          isMaskModified = true;
+        } else if (mode === 'thaw') {
+          masks[i] = Math.max(0.0, masks[i] - factor * 1.5);
+          isMaskModified = true;
+        } else {
+          const maskWeight = masks[i];
+          if (maskWeight >= 0.999) continue;
+          const effectiveFactor = factor * (1.0 - maskWeight);
+
+          if (mode === 'push') {
+            current[idx] -= normDragX * effectiveFactor;
+            current[idx + 1] -= normDragY * effectiveFactor;
+          } else if (mode === 'swell') {
+            if (dist > 0.00001) {
+              const invDist = 1.0 / dist;
+              const dirU = (du / aspect) * invDist;
+              const dirV = dv * invDist;
+              current[idx] -= dirU * normRadius * effectiveFactor * 0.25;
+              current[idx + 1] -= dirV * normRadius * effectiveFactor * 0.25;
+            }
+          } else if (mode === 'pinch') {
+            if (dist > 0.00001) {
+              const invDist = 1.0 / dist;
+              const dirU = (du / aspect) * invDist;
+              const dirV = dv * invDist;
+              current[idx] += dirU * normRadius * effectiveFactor * 0.25;
+              current[idx + 1] += dirV * normRadius * effectiveFactor * 0.25;
+            }
+          } else if (mode === 'reconstruct') {
+            const curU = current[idx];
+            const curV = current[idx + 1];
+            current[idx] += (base[idx] - curU) * effectiveFactor * 0.5;
+            current[idx + 1] += (base[idx + 1] - curV) * effectiveFactor * 0.5;
           }
-        } else if (mode === 'pinch') {
-          if (dist > 0.00001) {
-            const invDist = 1.0 / dist;
-            const dirU = (du / aspect) * invDist;
-            const dirV = dv * invDist;
-            current[idx] += dirU * normRadius * factor * 0.25;
-            current[idx + 1] += dirV * normRadius * factor * 0.25;
-          }
-        } else if (mode === 'reconstruct') {
-          const curU = current[idx];
-          const curV = current[idx + 1];
-          current[idx] += (base[idx] - curU) * factor * 0.5;
-          current[idx + 1] += (base[idx + 1] - curV) * factor * 0.5;
         }
       }
     }
 
-    this._updateUVBuffer();
+    if (isMaskModified) {
+      this._updateMaskBuffer();
+    } else {
+      this._updateUVBuffer();
+    }
     this.render();
   }
 
@@ -395,7 +479,10 @@ export class LiquifyEngine {
     if (this.historyIndex < this.history.length - 1) {
       this.history = this.history.slice(0, this.historyIndex + 1);
     }
-    this.history.push(new Float32Array(this.currentUVs));
+    this.history.push({
+      uvs: new Float32Array(this.currentUVs),
+      mask: new Float32Array(this.maskWeights)
+    });
     if (this.history.length > this.maxHistory) {
       this.history.shift();
     } else {
@@ -406,8 +493,11 @@ export class LiquifyEngine {
   undo() {
     if (this.historyIndex > 0) {
       this.historyIndex--;
-      this.currentUVs.set(this.history[this.historyIndex]);
+      const state = this.history[this.historyIndex];
+      this.currentUVs.set(state.uvs);
+      this.maskWeights.set(state.mask);
       this._updateUVBuffer();
+      this._updateMaskBuffer();
       this.render();
       return true;
     }
@@ -417,8 +507,11 @@ export class LiquifyEngine {
   redo() {
     if (this.historyIndex < this.history.length - 1) {
       this.historyIndex++;
-      this.currentUVs.set(this.history[this.historyIndex]);
+      const state = this.history[this.historyIndex];
+      this.currentUVs.set(state.uvs);
+      this.maskWeights.set(state.mask);
       this._updateUVBuffer();
+      this._updateMaskBuffer();
       this.render();
       return true;
     }
@@ -430,7 +523,9 @@ export class LiquifyEngine {
 
   resetToOriginal() {
     this.currentUVs.set(this.baseUVs);
+    this.maskWeights.fill(0);
     this._updateUVBuffer();
+    this._updateMaskBuffer();
     this.saveHistoryState();
     this.render();
   }
@@ -504,6 +599,44 @@ export class LiquifyEngine {
       gl.disableVertexAttribArray(this.aWireframePosLoc);
       gl.disableVertexAttribArray(this.aWireframeTexCoordLoc);
       gl.disableVertexAttribArray(this.aWireframeBaseUVLoc);
+      gl.disable(gl.BLEND);
+    }
+
+    if (this.showMaskOverlay && this.maskProgram && !this.isComparing) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      gl.useProgram(this.maskProgram);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+      gl.enableVertexAttribArray(this.aMaskPosLoc);
+      gl.vertexAttribPointer(this.aMaskPosLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
+      gl.enableVertexAttribArray(this.aMaskTexCoordLoc);
+      gl.vertexAttribPointer(this.aMaskTexCoordLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.baseUVBuffer);
+      gl.enableVertexAttribArray(this.aMaskBaseUVLoc);
+      gl.vertexAttribPointer(this.aMaskBaseUVLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
+      gl.enableVertexAttribArray(this.aMaskWeightLoc);
+      gl.vertexAttribPointer(this.aMaskWeightLoc, 1, gl.FLOAT, false, 0, 0);
+
+      const hex = this.maskColor.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16) / 255;
+      const g = parseInt(hex.substring(2, 4), 16) / 255;
+      const b = parseInt(hex.substring(4, 6), 16) / 255;
+      gl.uniform4f(this.uMaskColorLoc, r, g, b, this.maskOpacity);
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+      gl.drawElements(gl.TRIANGLES, this.numIndices, gl.UNSIGNED_INT, 0);
+
+      gl.disableVertexAttribArray(this.aMaskPosLoc);
+      gl.disableVertexAttribArray(this.aMaskTexCoordLoc);
+      gl.disableVertexAttribArray(this.aMaskBaseUVLoc);
+      gl.disableVertexAttribArray(this.aMaskWeightLoc);
       gl.disable(gl.BLEND);
     }
   }

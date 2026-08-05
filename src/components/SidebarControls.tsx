@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Sliders, Grid, Crosshair, Keyboard, RotateCcw } from 'lucide-react';
+import { X, Sliders, Grid, Crosshair, Keyboard, Shield } from 'lucide-react';
 import { BrushSettings } from '../types/liquify';
 
 interface SidebarControlsProps {
@@ -14,8 +14,7 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
   isOpen,
   onClose,
   settings,
-  onUpdateSettings,
-  onResetMesh
+  onUpdateSettings
 }) => {
   if (!isOpen) return null;
 
@@ -35,6 +34,43 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
       </div>
 
       <div className="space-y-6 pt-5">
+        {/* Protection Mask Settings */}
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <Shield className="w-4 h-4 text-rose-400" />
+            Protection Mask Overlay
+          </h3>
+          <div className="p-3.5 rounded-xl bg-slate-800/50 border border-slate-700/50 space-y-3">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-slate-300">Show Red Protection Mask</span>
+              <button
+                onClick={() => onUpdateSettings({ showMask: !settings.showMask })}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+                  settings.showMask
+                    ? 'bg-rose-600/30 text-rose-300 border-rose-500/80'
+                    : 'bg-slate-700/60 text-slate-400 border-slate-600/60'
+                }`}
+              >
+                {settings.showMask ? 'ENABLED' : 'HIDDEN'}
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300">Mask Overlay Opacity</span>
+                <span className="font-mono text-rose-400 font-medium">{Math.round(settings.maskOpacity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.1"
+                max="0.8"
+                step="0.05"
+                value={settings.maskOpacity}
+                onChange={(e) => onUpdateSettings({ maskOpacity: parseFloat(e.target.value) })}
+                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-500"
+              />
+            </div>
+          </div>
+        </div>
         {/* Touch Ergonomics Section */}
         <div className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
@@ -132,6 +168,10 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
             <div className="flex justify-between">
               <span className="text-slate-400">Reconstruct / Pan</span>
               <kbd className="px-1.5 py-0.5 rounded bg-slate-700 font-mono text-[10px]">4 / 5</kbd>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Freeze / Thaw Mask</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-slate-700 font-mono text-[10px]">6 / 7</kbd>
             </div>
           </div>
         </div>

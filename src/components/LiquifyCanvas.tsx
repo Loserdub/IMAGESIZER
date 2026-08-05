@@ -228,10 +228,16 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     let screenY = e.clientY - (rect?.top  ?? 0);
 
     const s = settingsRef.current;
-    if (e.pointerType === 'touch' && s.enableOffset) {
+    const isTouch = e.pointerType === 'touch';
+
+    if (isTouch && s.enableOffset) {
       const offsetY = screenY - s.touchOffset;
       setReticlePos({ touchX: screenX, touchY: screenY, targetX: screenX, targetY: offsetY });
+      setCursorPos({ x: screenX, y: offsetY, visible: true });
       screenY = offsetY;
+    } else {
+      setReticlePos(null);
+      setCursorPos({ x: screenX, y: screenY, visible: true });
     }
 
     lastPointRef.current = { x: screenX, y: screenY };
@@ -295,6 +301,19 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     isDraggingRef.current = false;
     lastPointRef.current  = null;
     setReticlePos(null);
+
+    // Hide cursor if pointer released outside canvas container
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      const inside =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+      if (!inside) {
+        setCursorPos(prev => ({ ...prev, visible: false }));
+      }
+    }
 
     const mode = toolModeRef.current;
     if (mode !== 'pan' && engineRef.current) {
@@ -370,8 +389,14 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      onPointerLeave={() => setCursorPos(prev => ({ ...prev, visible: false }))}
-      className="relative w-full h-full bg-slate-950 overflow-hidden select-none touch-none cursor-crosshair"
+      onPointerLeave={() => {
+        if (!isDraggingRef.current) {
+          setCursorPos(prev => ({ ...prev, visible: false }));
+        }
+      }}
+      className={`relative w-full h-full bg-slate-950 overflow-hidden select-none touch-none ${
+        toolMode === 'pan' ? (isDraggingRef.current ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-none'
+      }`}
     >
       {/* WebGL Canvas — CSS fills container, backing buffer is DPR-scaled (FIX #2) */}
       <canvas
@@ -389,7 +414,7 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
         className="absolute top-0 left-0"
       />
 
-      {/* Visual Brush Cursor Ring */}
+      {/* Visual Brush Cursor Ring & Precision Crosshair */}
       {cursorPos.visible && toolMode !== 'pan' && (
         <div
           style={{
@@ -402,11 +427,14 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
         >
           {/* Inner falloff pressure ring */}
           <div
-            style={{ width: `${settings.size * 0.4}px`, height: `${settings.size * 0.4}px` }}
+            style={{ width: `${settings.size * 0.5}px`, height: `${settings.size * 0.5}px` }}
             className="rounded-full border border-indigo-300/40 bg-indigo-400/5"
           />
+          {/* Precision crosshair guides */}
+          <div className="absolute w-full h-[1px] bg-indigo-400/30" />
+          <div className="absolute h-full w-[1px] bg-indigo-400/30" />
           {/* Center focal dot */}
-          <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full absolute shadow-sm" />
+          <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full absolute shadow-sm border border-slate-900" />
         </div>
       )}
 
@@ -425,7 +453,7 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
           <circle
             cx={reticlePos.touchX}
             cy={reticlePos.touchY}
-            r="8"
+            r="10"
             fill="rgba(16, 185, 129, 0.2)"
             stroke="#10b981"
             strokeWidth="2"

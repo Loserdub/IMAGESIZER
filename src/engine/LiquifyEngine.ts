@@ -1,5 +1,10 @@
 import { ToolMode, ExportSettings } from '../types/liquify';
 
+export interface HistoryState {
+  uvs: Float32Array;
+  mask: Float32Array;
+}
+
 export class LiquifyEngine {
   private canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | WebGL2RenderingContext | null = null;
@@ -19,15 +24,17 @@ export class LiquifyEngine {
   private numVertices = 0;
 
   // CPU-side arrays
-  private positions: Float32Array = new Float32Array(0);  // Clip-space [-1, 1]
-  private baseUVs: Float32Array = new Float32Array(0);    // Normalized [0, 1]
-  private currentUVs: Float32Array = new Float32Array(0); // Deformed texture coords
+  private positions: Float32Array = new Float32Array(0);   // Clip-space [-1, 1]
+  private baseUVs: Float32Array = new Float32Array(0);     // Normalized [0, 1]
+  private currentUVs: Float32Array = new Float32Array(0);  // Deformed texture coords
+  private maskWeights: Float32Array = new Float32Array(0); // Freeze mask protection [0.0 = free, 1.0 = locked]
 
   // GPU Buffers
   private vertexBuffer: WebGLBuffer | null = null;
   private texCoordBuffer: WebGLBuffer | null = null;
-  private baseUVBuffer: WebGLBuffer | null = null;  // FIX #5: dedicated baseUV buffer for wireframe
-  private compareBuffer: WebGLBuffer | null = null; // FIX #4: persistent compare buffer, no per-frame alloc
+  private baseUVBuffer: WebGLBuffer | null = null;
+  private compareBuffer: WebGLBuffer | null = null;
+  private maskBuffer: WebGLBuffer | null = null;
   private indexBuffer: WebGLBuffer | null = null;
   private wireframeIndexBuffer: WebGLBuffer | null = null;
 
@@ -37,6 +44,7 @@ export class LiquifyEngine {
   // Shaders
   private imageProgram: WebGLProgram | null = null;
   private wireframeProgram: WebGLProgram | null = null;
+  private maskProgram: WebGLProgram | null = null;
 
   // Shader attribute/uniform locations — Image program
   private aPositionLoc = -1;
@@ -46,8 +54,15 @@ export class LiquifyEngine {
   // Shader attribute/uniform locations — Wireframe program
   private aWireframePosLoc = -1;
   private aWireframeTexCoordLoc = -1;
-  private aWireframeBaseUVLoc = -1; // FIX #5: properly declared
+  private aWireframeBaseUVLoc = -1;
   private uWireframeColorLoc: WebGLUniformLocation | null = null;
+
+  // Shader attribute/uniform locations — Mask program
+  private aMaskPosLoc = -1;
+  private aMaskTexCoordLoc = -1;
+  private aMaskBaseUVLoc = -1;
+  private aMaskWeightLoc = -1;
+  private uMaskColorLoc: WebGLUniformLocation | null = null;
 
   // State
   private isComparing = false;
@@ -55,8 +70,12 @@ export class LiquifyEngine {
   private meshOpacity = 0.5;
   private meshColor = '#3b82f6';
 
-  // History stack — stores lightweight Float32Array copies of currentUVs
-  private history: Float32Array[] = [];
+  private showMaskOverlay = true;
+  private maskOpacity = 0.35;
+  private maskColor = '#ef4444';
+
+  // History stack — stores lightweight Float32Array copies of currentUVs and maskWeights
+  private history: HistoryState[] = [];
   private historyIndex = -1;
   private maxHistory = 40;
 
@@ -70,7 +89,6 @@ export class LiquifyEngine {
   // ---------------------------------------------------------------------------
 
   private initGL() {
-    // Prefer WebGL2, fall back to WebGL1 with UNSIGNED_INT extension
     const gl2 = this.canvas.getContext('webgl2', { preserveDrawingBuffer: true, alpha: false });
     if (gl2) {
       this.gl = gl2;
@@ -81,11 +99,7 @@ export class LiquifyEngine {
         console.error('[LiquifyEngine] WebGL not supported in this browser.');
         return;
       }
-      // FIX #6: Enable UNSIGNED_INT indices for WebGL1 so drawElements doesn't silently fail
-      const ext = gl1.getExtension('OES_element_index_uint');
-      if (!ext) {
-        console.warn('[LiquifyEngine] OES_element_index_uint not available — falling back to UNSIGNED_SHORT indices.');
-      }
+      gl1.getExtension('OES_element_index_uint');
       this.gl = gl1;
       this.isWebGL2 = false;
     }
@@ -115,25 +129,18 @@ export class LiquifyEngine {
 
     this.imageProgram = this.createProgram(vsImage, fsImage);
     if (this.imageProgram) {
-      this.aPositionLoc  = gl.getAttribLocation(this.imageProgram, 'a_position');
-      this.aTexCoordLoc  = gl.getAttribLocation(this.imageProgram, 'a_texCoord');
-      this.uImageLoc     = gl.getUniformLocation(this.imageProgram, 'u_image');
+      this.aPositionLoc = gl.getAttribLocation(this.imageProgram, 'a_position');
+      this.aTexCoordLoc = gl.getAttribLocation(this.imageProgram, 'a_texCoord');
+      this.uImageLoc    = gl.getUniformLocation(this.imageProgram, 'u_image');
     }
 
     // --- Wireframe overlay shader ---
-    // FIX #5: Correctly uses a_baseUV to reconstruct vertex displacement in clip space.
-    // The deformation delta (currentUV - baseUV) is mapped back to clip-space offset.
-    // We do NOT displace gl_Position by 2x the UV difference directly — that was
-    // wrong because the mesh vertex positions already live in clip space [-1,1] and
-    // texture UVs live in [0,1]. The correct transform is:
-    //   clipDelta.x =  (currentUV.x - baseUV.x) * 2.0
-    //   clipDelta.y = -(currentUV.y - baseUV.y) * 2.0  (Y is flipped)
     const vsWireframe = `
       attribute vec2 a_position;
       attribute vec2 a_texCoord;
       attribute vec2 a_baseUV;
       void main() {
-        vec2 uvDelta = a_texCoord - a_baseUV;
+        vec2 uvDelta = a_baseUV - a_texCoord;
         vec2 clipDelta = vec2(uvDelta.x * 2.0, -uvDelta.y * 2.0);
         gl_Position = vec4(a_position + clipDelta, -0.1, 1.0);
       }
@@ -151,8 +158,42 @@ export class LiquifyEngine {
     if (this.wireframeProgram) {
       this.aWireframePosLoc      = gl.getAttribLocation(this.wireframeProgram, 'a_position');
       this.aWireframeTexCoordLoc = gl.getAttribLocation(this.wireframeProgram, 'a_texCoord');
-      this.aWireframeBaseUVLoc   = gl.getAttribLocation(this.wireframeProgram, 'a_baseUV'); // FIX #5
+      this.aWireframeBaseUVLoc   = gl.getAttribLocation(this.wireframeProgram, 'a_baseUV');
       this.uWireframeColorLoc    = gl.getUniformLocation(this.wireframeProgram, 'u_color');
+    }
+
+    // --- Freeze Mask overlay shader ---
+    const vsMask = `
+      attribute vec2 a_position;
+      attribute vec2 a_texCoord;
+      attribute vec2 a_baseUV;
+      attribute float a_maskWeight;
+      varying float v_maskWeight;
+      void main() {
+        vec2 uvDelta = a_baseUV - a_texCoord;
+        vec2 clipDelta = vec2(uvDelta.x * 2.0, -uvDelta.y * 2.0);
+        gl_Position = vec4(a_position + clipDelta, -0.05, 1.0);
+        v_maskWeight = a_maskWeight;
+      }
+    `;
+
+    const fsMask = `
+      precision mediump float;
+      uniform vec4 u_color;
+      varying float v_maskWeight;
+      void main() {
+        if (v_maskWeight <= 0.001) discard;
+        gl_FragColor = vec4(u_color.rgb, u_color.a * v_maskWeight);
+      }
+    `;
+
+    this.maskProgram = this.createProgram(vsMask, fsMask);
+    if (this.maskProgram) {
+      this.aMaskPosLoc      = gl.getAttribLocation(this.maskProgram, 'a_position');
+      this.aMaskTexCoordLoc = gl.getAttribLocation(this.maskProgram, 'a_texCoord');
+      this.aMaskBaseUVLoc   = gl.getAttribLocation(this.maskProgram, 'a_baseUV');
+      this.aMaskWeightLoc   = gl.getAttribLocation(this.maskProgram, 'a_maskWeight');
+      this.uMaskColorLoc    = gl.getUniformLocation(this.maskProgram, 'u_color');
     }
   }
 
@@ -191,7 +232,6 @@ export class LiquifyEngine {
       return null;
     }
 
-    // Shaders can be freed from GPU after linking
     gl.deleteShader(vs);
     gl.deleteShader(fs);
 
@@ -212,7 +252,6 @@ export class LiquifyEngine {
     this.cols          = gridSize;
     this.rows          = Math.round(gridSize * (image.height / image.width));
 
-    // Upload texture
     if (this.imageTexture) gl.deleteTexture(this.imageTexture);
     this.imageTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.imageTexture);
@@ -224,7 +263,6 @@ export class LiquifyEngine {
 
     this.buildMesh();
 
-    // Clear history and record pristine state
     this.history = [];
     this.historyIndex = -1;
     this.saveHistoryState();
@@ -249,22 +287,23 @@ export class LiquifyEngine {
     const rows = this.rows;
     this.numVertices = (cols + 1) * (rows + 1);
 
-    this.positions  = new Float32Array(this.numVertices * 2);
-    this.baseUVs    = new Float32Array(this.numVertices * 2);
-    this.currentUVs = new Float32Array(this.numVertices * 2);
+    this.positions   = new Float32Array(this.numVertices * 2);
+    this.baseUVs     = new Float32Array(this.numVertices * 2);
+    this.currentUVs  = new Float32Array(this.numVertices * 2);
+    this.maskWeights = new Float32Array(this.numVertices);
 
     let idx = 0;
     for (let r = 0; r <= rows; r++) {
       const v = r / rows;
-      const yPos = 1.0 - 2.0 * v; // WebGL NDC: +1 = top, -1 = bottom
+      const yPos = 1.0 - 2.0 * v;
       for (let c = 0; c <= cols; c++) {
         const u = c / cols;
-        const xPos = 2.0 * u - 1.0; // WebGL NDC: -1 = left, +1 = right
+        const xPos = 2.0 * u - 1.0;
 
         this.positions[idx]     = xPos;
         this.positions[idx + 1] = yPos;
 
-        this.baseUVs[idx]    = u;
+        this.baseUVs[idx]     = u;
         this.baseUVs[idx + 1] = v;
 
         this.currentUVs[idx]     = u;
@@ -274,7 +313,6 @@ export class LiquifyEngine {
       }
     }
 
-    // Triangle indices
     const numQuads = cols * rows;
     this.numIndices = numQuads * 6;
     const indices = new Uint32Array(this.numIndices);
@@ -295,7 +333,6 @@ export class LiquifyEngine {
       }
     }
 
-    // Wireframe indices (horizontal + vertical line segments)
     const numHLines = (rows + 1) * cols;
     const numVLines = (cols + 1) * rows;
     this.numWireframeIndices = (numHLines + numVLines) * 2;
@@ -317,45 +354,43 @@ export class LiquifyEngine {
       }
     }
 
-    // Upload vertex position buffer (static — positions never change)
     this.deleteBuffer('vertexBuffer');
     this.vertexBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.positions, gl.STATIC_DRAW);
 
-    // Upload baseUV buffer (static — base UVs never change)  FIX #5
     this.deleteBuffer('baseUVBuffer');
     this.baseUVBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.baseUVBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.baseUVs, gl.STATIC_DRAW);
 
-    // Upload currentUV buffer (dynamic — updated every warp stroke)
     this.deleteBuffer('texCoordBuffer');
     this.texCoordBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.currentUVs, gl.DYNAMIC_DRAW);
 
-    // FIX #4: Allocate a persistent compare buffer (baseUVs copy) — uploaded once, reused forever
     this.deleteBuffer('compareBuffer');
     this.compareBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.compareBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.baseUVs, gl.STATIC_DRAW);
 
-    // Triangle index buffer
+    this.deleteBuffer('maskBuffer');
+    this.maskBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, this.maskWeights, gl.DYNAMIC_DRAW);
+
     this.deleteBuffer('indexBuffer');
     this.indexBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
-    // Wireframe index buffer
     this.deleteBuffer('wireframeIndexBuffer');
     this.wireframeIndexBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.wireframeIndexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, wireIndices, gl.STATIC_DRAW);
   }
 
-  /** Helper to delete a named buffer field safely */
-  private deleteBuffer(field: 'vertexBuffer' | 'texCoordBuffer' | 'baseUVBuffer' | 'compareBuffer' | 'indexBuffer' | 'wireframeIndexBuffer') {
+  private deleteBuffer(field: 'vertexBuffer' | 'texCoordBuffer' | 'baseUVBuffer' | 'compareBuffer' | 'maskBuffer' | 'indexBuffer' | 'wireframeIndexBuffer') {
     const gl = this.gl;
     if (!gl) return;
     const buf = this[field];
@@ -366,7 +401,7 @@ export class LiquifyEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // UV Buffer Sync
+  // UV & Mask Buffer Sync
   // ---------------------------------------------------------------------------
 
   private updateUVBuffer() {
@@ -376,16 +411,23 @@ export class LiquifyEngine {
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.currentUVs);
   }
 
+  private updateMaskBuffer() {
+    const gl = this.gl;
+    if (!gl || !this.maskBuffer) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.maskWeights);
+  }
+
   // ---------------------------------------------------------------------------
-  // Warp Application
+  // Warp & Mask Application
   // ---------------------------------------------------------------------------
 
   public applyWarp(
-    normX: number,      // Brush center X in image-normalized [0, 1]
-    normY: number,      // Brush center Y in image-normalized [0, 1]
-    normDragX: number,  // Drag vector X in image-normalized coords
-    normDragY: number,  // Drag vector Y in image-normalized coords
-    normRadius: number, // Brush radius in image-normalized units
+    normX: number,
+    normY: number,
+    normDragX: number,
+    normDragY: number,
+    normRadius: number,
     strength: number,
     mode: ToolMode
   ) {
@@ -394,18 +436,18 @@ export class LiquifyEngine {
     const numVerts = this.numVertices;
     const current  = this.currentUVs;
     const base     = this.baseUVs;
+    const masks    = this.maskWeights;
     const r2       = normRadius * normRadius;
     if (r2 <= 0) return;
 
-    // Aspect ratio correction: makes the brush perfectly circular on-screen
     const aspect = this.imageWidth / this.imageHeight;
+    let isMaskModified = false;
 
     for (let i = 0; i < numVerts; i++) {
       const idx = i * 2;
       const u = current[idx];
       const v = current[idx + 1];
 
-      // Distance from brush center (aspect-corrected so brush is circular)
       const du = (u - normX) * aspect;
       const dv = v - normY;
       const dist2 = du * du + dv * dv;
@@ -414,47 +456,82 @@ export class LiquifyEngine {
         const dist     = Math.sqrt(dist2);
         const normDist = dist / normRadius;
 
-        // Smooth hermite-like falloff: f(t) = (1 - t²)²
         const falloff = (1.0 - normDist * normDist) * (1.0 - normDist * normDist);
         const factor  = falloff * strength;
 
-        if (mode === 'push') {
-          // Move texture UVs opposite to drag direction (pixels follow brush)
-          current[idx]     -= normDragX * factor;
-          current[idx + 1] -= normDragY * factor;
+        if (mode === 'freeze') {
+          // Freeze Mask: add protection weight
+          masks[i] = Math.min(1.0, masks[i] + factor * 1.5);
+          isMaskModified = true;
+        } else if (mode === 'thaw') {
+          // Thaw Mask: erase protection weight
+          masks[i] = Math.max(0.0, masks[i] - factor * 1.5);
+          isMaskModified = true;
+        } else {
+          // Warp modes: respect protection mask weight (1.0 = completely locked)
+          const maskWeight = masks[i];
+          if (maskWeight >= 0.999) continue;
+          const effectiveFactor = factor * (1.0 - maskWeight);
 
-        } else if (mode === 'swell') {
-          // Bloat: pull texture UVs toward brush center (pixels expand outward)
-          if (dist > 0.00001) {
-            const invDist = 1.0 / dist;
-            const dirU = (du / aspect) * invDist;
-            const dirV = dv * invDist;
-            current[idx]     -= dirU * normRadius * factor * 0.25;
-            current[idx + 1] -= dirV * normRadius * factor * 0.25;
+          if (mode === 'push') {
+            current[idx]     -= normDragX * effectiveFactor;
+            current[idx + 1] -= normDragY * effectiveFactor;
+          } else if (mode === 'swell') {
+            if (dist > 0.00001) {
+              const invDist = 1.0 / dist;
+              const dirU = (du / aspect) * invDist;
+              const dirV = dv * invDist;
+              current[idx]     -= dirU * normRadius * effectiveFactor * 0.25;
+              current[idx + 1] -= dirV * normRadius * effectiveFactor * 0.25;
+            }
+          } else if (mode === 'pinch') {
+            if (dist > 0.00001) {
+              const invDist = 1.0 / dist;
+              const dirU = (du / aspect) * invDist;
+              const dirV = dv * invDist;
+              current[idx]     += dirU * normRadius * effectiveFactor * 0.25;
+              current[idx + 1] += dirV * normRadius * effectiveFactor * 0.25;
+            }
+          } else if (mode === 'reconstruct') {
+            const curU = current[idx];
+            const curV = current[idx + 1];
+            current[idx]     += (base[idx]     - curU) * effectiveFactor * 0.5;
+            current[idx + 1] += (base[idx + 1] - curV) * effectiveFactor * 0.5;
           }
-
-        } else if (mode === 'pinch') {
-          // Pinch: push texture UVs away from brush center (pixels contract)
-          if (dist > 0.00001) {
-            const invDist = 1.0 / dist;
-            const dirU = (du / aspect) * invDist;
-            const dirV = dv * invDist;
-            current[idx]     += dirU * normRadius * factor * 0.25;
-            current[idx + 1] += dirV * normRadius * factor * 0.25;
-          }
-
-        } else if (mode === 'reconstruct') {
-          // FIX #7: Cache both current UV values before modifying either,
-          // so the V delta is not computed from the already-modified U value.
-          const curU = current[idx];
-          const curV = current[idx + 1];
-          current[idx]     += (base[idx]     - curU) * factor * 0.5;
-          current[idx + 1] += (base[idx + 1] - curV) * factor * 0.5;
         }
       }
     }
 
-    this.updateUVBuffer();
+    if (isMaskModified) {
+      this.updateMaskBuffer();
+    } else {
+      this.updateUVBuffer();
+    }
+    this.render();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Freeze Mask Management
+  // ---------------------------------------------------------------------------
+
+  public clearMask() {
+    this.maskWeights.fill(0);
+    this.updateMaskBuffer();
+    this.saveHistoryState();
+    this.render();
+  }
+
+  public hasMask(): boolean {
+    for (let i = 0; i < this.maskWeights.length; i++) {
+      if (this.maskWeights[i] > 0.001) return true;
+    }
+    return false;
+  }
+
+  public setMaskOverlay(enabled: boolean, opacity = 0.35, color = '#ef4444') {
+    this.showMaskOverlay = enabled;
+    this.maskOpacity     = opacity;
+    this.maskColor       = color;
     this.render();
   }
 
@@ -463,12 +540,15 @@ export class LiquifyEngine {
   // ---------------------------------------------------------------------------
 
   public saveHistoryState() {
-    // Prune redo branch when a new action is taken after undo
     if (this.historyIndex < this.history.length - 1) {
       this.history = this.history.slice(0, this.historyIndex + 1);
     }
 
-    this.history.push(new Float32Array(this.currentUVs));
+    this.history.push({
+      uvs: new Float32Array(this.currentUVs),
+      mask: new Float32Array(this.maskWeights)
+    });
+
     if (this.history.length > this.maxHistory) {
       this.history.shift();
     } else {
@@ -479,8 +559,11 @@ export class LiquifyEngine {
   public undo(): boolean {
     if (this.historyIndex > 0) {
       this.historyIndex--;
-      this.currentUVs.set(this.history[this.historyIndex]);
+      const state = this.history[this.historyIndex];
+      this.currentUVs.set(state.uvs);
+      this.maskWeights.set(state.mask);
       this.updateUVBuffer();
+      this.updateMaskBuffer();
       this.render();
       return true;
     }
@@ -490,8 +573,11 @@ export class LiquifyEngine {
   public redo(): boolean {
     if (this.historyIndex < this.history.length - 1) {
       this.historyIndex++;
-      this.currentUVs.set(this.history[this.historyIndex]);
+      const state = this.history[this.historyIndex];
+      this.currentUVs.set(state.uvs);
+      this.maskWeights.set(state.mask);
       this.updateUVBuffer();
+      this.updateMaskBuffer();
       this.render();
       return true;
     }
@@ -503,7 +589,9 @@ export class LiquifyEngine {
 
   public resetToOriginal() {
     this.currentUVs.set(this.baseUVs);
+    this.maskWeights.fill(0);
     this.updateUVBuffer();
+    this.updateMaskBuffer();
     this.saveHistoryState();
     this.render();
   }
@@ -545,13 +633,10 @@ export class LiquifyEngine {
     // === 1. Draw image ===
     gl.useProgram(this.imageProgram);
 
-    // Position vertices
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.enableVertexAttribArray(this.aPositionLoc);
     gl.vertexAttribPointer(this.aPositionLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // FIX #4: Use pre-allocated compareBuffer (baseUVs) or the live texCoordBuffer.
-    // No per-frame GPU allocation — zero memory leak.
     const uvBuffer = this.isComparing ? this.compareBuffer : this.texCoordBuffer;
     gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
     gl.enableVertexAttribArray(this.aTexCoordLoc);
@@ -562,8 +647,6 @@ export class LiquifyEngine {
     gl.uniform1i(this.uImageLoc, 0);
 
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
-    // FIX #6: UNSIGNED_INT is safe because OES_element_index_uint is enabled for WebGL1,
-    // and WebGL2 supports it natively.
     gl.drawElements(gl.TRIANGLES, this.numIndices, gl.UNSIGNED_INT, 0);
 
     // === 2. Draw wireframe overlay (if enabled) ===
@@ -573,22 +656,18 @@ export class LiquifyEngine {
 
       gl.useProgram(this.wireframeProgram);
 
-      // a_position — vertex clip-space positions
       gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
       gl.enableVertexAttribArray(this.aWireframePosLoc);
       gl.vertexAttribPointer(this.aWireframePosLoc, 2, gl.FLOAT, false, 0, 0);
 
-      // a_texCoord — current (deformed) UV coords
       gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
       gl.enableVertexAttribArray(this.aWireframeTexCoordLoc);
       gl.vertexAttribPointer(this.aWireframeTexCoordLoc, 2, gl.FLOAT, false, 0, 0);
 
-      // FIX #5: a_baseUV — original (undeformed) UV coords, now actually bound
       gl.bindBuffer(gl.ARRAY_BUFFER, this.baseUVBuffer);
       gl.enableVertexAttribArray(this.aWireframeBaseUVLoc);
       gl.vertexAttribPointer(this.aWireframeBaseUVLoc, 2, gl.FLOAT, false, 0, 0);
 
-      // Parse hex color string → vec4
       const hex = this.meshColor.replace('#', '');
       const r   = parseInt(hex.substring(0, 2), 16) / 255;
       const g   = parseInt(hex.substring(2, 4), 16) / 255;
@@ -598,10 +677,49 @@ export class LiquifyEngine {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.wireframeIndexBuffer);
       gl.drawElements(gl.LINES, this.numWireframeIndices, gl.UNSIGNED_INT, 0);
 
-      // Clean up attrib state to avoid contaminating subsequent draws
       gl.disableVertexAttribArray(this.aWireframePosLoc);
       gl.disableVertexAttribArray(this.aWireframeTexCoordLoc);
       gl.disableVertexAttribArray(this.aWireframeBaseUVLoc);
+
+      gl.disable(gl.BLEND);
+    }
+
+    // === 3. Draw Freeze Mask overlay (if enabled) ===
+    if (this.showMaskOverlay && this.maskProgram && !this.isComparing) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      gl.useProgram(this.maskProgram);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+      gl.enableVertexAttribArray(this.aMaskPosLoc);
+      gl.vertexAttribPointer(this.aMaskPosLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
+      gl.enableVertexAttribArray(this.aMaskTexCoordLoc);
+      gl.vertexAttribPointer(this.aMaskTexCoordLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.baseUVBuffer);
+      gl.enableVertexAttribArray(this.aMaskBaseUVLoc);
+      gl.vertexAttribPointer(this.aMaskBaseUVLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
+      gl.enableVertexAttribArray(this.aMaskWeightLoc);
+      gl.vertexAttribPointer(this.aMaskWeightLoc, 1, gl.FLOAT, false, 0, 0);
+
+      const hex = this.maskColor.replace('#', '');
+      const r   = parseInt(hex.substring(0, 2), 16) / 255;
+      const g   = parseInt(hex.substring(2, 4), 16) / 255;
+      const b   = parseInt(hex.substring(4, 6), 16) / 255;
+      gl.uniform4f(this.uMaskColorLoc, r, g, b, this.maskOpacity);
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+      gl.drawElements(gl.TRIANGLES, this.numIndices, gl.UNSIGNED_INT, 0);
+
+      gl.disableVertexAttribArray(this.aMaskPosLoc);
+      gl.disableVertexAttribArray(this.aMaskTexCoordLoc);
+      gl.disableVertexAttribArray(this.aMaskBaseUVLoc);
+      gl.disableVertexAttribArray(this.aMaskWeightLoc);
 
       gl.disable(gl.BLEND);
     }
@@ -618,7 +736,6 @@ export class LiquifyEngine {
         return;
       }
 
-      // Off-screen canvas at native image dimensions for lossless UV mapping
       const exportCanvas = document.createElement('canvas');
       exportCanvas.width  = this.imageWidth;
       exportCanvas.height = this.imageHeight;
@@ -626,7 +743,6 @@ export class LiquifyEngine {
       const exportEngine = new LiquifyEngine(exportCanvas);
       exportEngine.loadImage(this.originalImage, this.cols);
 
-      // Copy current UV deformation state to export engine
       exportEngine.currentUVs.set(this.currentUVs);
       exportEngine.updateUVBuffer();
       exportEngine.render();
