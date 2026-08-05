@@ -21,11 +21,11 @@ export default function App() {
     size: 90,
     strength: 0.5,
     touchOffset: 45,
-    enableOffset: true,
+    enableOffset: false,
     meshOverlay: false,
     meshGridSize: 120,
     meshOpacity: 0.5,
-    meshColor: '#3b82f6',
+    meshColor: '#10b981',
     showMask: true,
     maskOpacity: 0.35,
     maskColor: '#ef4444'
@@ -169,7 +169,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 font-sans select-none">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 font-sans select-none">
       {/* Top Navigation Header */}
       <Header
         sampleImages={sampleImages}

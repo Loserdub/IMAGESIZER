@@ -1,1 +1,53 @@
 @import "tailwindcss";
+
+/* ── Dark Emerald Tech Theme ──────────────────────────────────── */
+
+:root {
+  --accent-hue: 160;
+  color-scheme: dark;
+}
+
+/* Custom scrollbar for sidebar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(16, 185, 129, 0.2);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.35);
+}
+
+/* Range slider accent override — emerald */
+input[type="range"] {
+  accent-color: #10b981;
+}
+input[type="range"]::-webkit-slider-thumb {
+  cursor: pointer;
+}
+
+/* Slide-in animation for sidebar */
+@keyframes slide-left {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.animate-slide-left {
+  animation: slide-left 0.2s ease-out;
+}
+
+/* Fade-in for modals */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

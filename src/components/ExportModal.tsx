@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, X, Image as ImageIcon, Sparkles, Check } from 'lucide-react';
+import { Download, X, Image as ImageIcon, Check } from 'lucide-react';
 import { ExportFormat, ExportSettings, ImageDimensions } from '../types/liquify';
 
 interface ExportModalProps {
@@ -35,58 +35,58 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   const getFormatLabel = (fmt: ExportFormat) => {
     switch (fmt) {
-      case 'image/png': return 'PNG (Lossless, High Quality)';
-      case 'image/jpeg': return 'JPEG (Compressed, Smaller File)';
-      case 'image/webp': return 'WebP (Modern, Optimal Compression)';
+      case 'image/png': return 'PNG — Lossless, highest quality';
+      case 'image/jpeg': return 'JPEG — Compressed, smaller file';
+      case 'image/webp': return 'WebP — Modern, optimal compression';
     }
   };
 
   const megapixels = ((dimensions.width * dimensions.height) / 1000000).toFixed(1);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
       <div 
-        className="w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden text-slate-100"
+        className="w-full max-w-md bg-neutral-950 border border-neutral-800/60 rounded-2xl overflow-hidden text-neutral-100"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/50">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400">
-              <Download className="w-5 h-5" />
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-neutral-800/50">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-md bg-emerald-500/15 text-emerald-400">
+              <Download className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-semibold text-lg leading-snug">Export High-Res Image</h3>
-              <p className="text-xs text-slate-400">Preserves original native resolution</p>
+              <h3 className="font-medium text-sm">Export Image</h3>
+              <p className="text-[10px] text-neutral-500">Native resolution output</p>
             </div>
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1 rounded-md text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-5">
+        <div className="p-5 space-y-4">
           {/* Resolution Badge */}
-          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50 flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2 text-slate-300">
-              <ImageIcon className="w-4 h-4 text-indigo-400" />
-              <span>Native Dimensions:</span>
+          <div className="p-3 rounded-lg bg-neutral-900/80 border border-neutral-800/40 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5 text-neutral-400">
+              <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Dimensions</span>
             </div>
-            <span className="font-mono font-medium text-indigo-300">
-              {dimensions.width} × {dimensions.height} px ({megapixels} MP)
+            <span className="font-mono text-emerald-400">
+              {dimensions.width} × {dimensions.height} ({megapixels} MP)
             </span>
           </div>
 
           {/* Format Selection */}
           <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Image Format
+            <label className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">
+              Format
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-1.5">
               {(['image/png', 'image/jpeg', 'image/webp'] as ExportFormat[]).map((fmt) => {
                 const ext = fmt.split('/')[1].toUpperCase();
                 const isSelected = format === fmt;
@@ -94,29 +94,29 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   <button
                     key={fmt}
                     onClick={() => setFormat(fmt)}
-                    className={`py-2.5 px-3 rounded-xl border text-xs font-medium flex flex-col items-center gap-1 transition-all ${
+                    className={`py-2 px-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-0.5 transition-all cursor-pointer ${
                       isSelected
-                        ? 'border-indigo-500 bg-indigo-600/20 text-indigo-300 shadow-md shadow-indigo-950/30'
-                        : 'border-slate-800 bg-slate-800/40 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                        ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+                        : 'border-neutral-800/50 bg-neutral-900/50 text-neutral-500 hover:bg-neutral-800/80 hover:text-neutral-300'
                     }`}
                   >
                     <span>{ext}</span>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                    {isSelected && <Check className="w-3 h-3 text-emerald-400" />}
                   </button>
                 );
               })}
             </div>
-            <p className="text-[11px] text-slate-400 pt-0.5">{getFormatLabel(format)}</p>
+            <p className="text-[10px] text-neutral-500">{getFormatLabel(format)}</p>
           </div>
 
           {/* Quality Slider (for JPEG / WebP) */}
           {format !== 'image/png' && (
-            <div className="space-y-2 pt-1">
+            <div className="space-y-1.5">
               <div className="flex justify-between items-center text-xs">
-                <label className="font-semibold uppercase tracking-wider text-slate-400">
-                  Export Quality
+                <label className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">
+                  Quality
                 </label>
-                <span className="font-mono text-indigo-400 font-medium">
+                <span className="font-mono text-emerald-400 text-[11px]">
                   {Math.round(quality * 100)}%
                 </span>
               </div>
@@ -127,29 +127,29 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 step="0.05"
                 value={quality}
                 onChange={(e) => setQuality(parseFloat(e.target.value))}
-                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
               />
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800 bg-slate-950/50">
+        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-neutral-800/50">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
           >
             Cancel
           </button>
           <button
             onClick={handleExport}
             disabled={isExporting}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 disabled:opacity-50 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-all cursor-pointer"
           >
             {isExporting ? (
-              <span className="animate-spin text-lg">⏳</span>
+              <span className="animate-spin text-sm">⏳</span>
             ) : (
-              <Download className="w-4 h-4" />
+              <Download className="w-3.5 h-3.5" />
             )}
             <span>{isExporting ? 'Exporting...' : 'Save Image'}</span>
           </button>

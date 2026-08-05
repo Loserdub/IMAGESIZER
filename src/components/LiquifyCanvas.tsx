@@ -124,6 +124,13 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     }
   }, [settings.meshGridSize]);
 
+  // Clear touch reticle offset if offset is disabled in settings
+  useEffect(() => {
+    if (!settings.enableOffset) {
+      setReticlePos(null);
+    }
+  }, [settings.enableOffset]);
+
   // ---------------------------------------------------------------------------
   // FIX #10: Passive wheel listener — attach via useEffect with { passive: false }
   // so e.preventDefault() actually works and the page doesn't scroll.
@@ -394,7 +401,7 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
           setCursorPos(prev => ({ ...prev, visible: false }));
         }
       }}
-      className={`relative w-full h-full bg-slate-950 overflow-hidden select-none touch-none ${
+      className={`relative w-full h-full bg-neutral-950 overflow-hidden select-none touch-none ${
         toolMode === 'pan' ? (isDraggingRef.current ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-none'
       }`}
     >
@@ -423,18 +430,18 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
             width:  `${settings.size}px`,
             height: `${settings.size}px`
           }}
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-indigo-400/80 bg-indigo-500/10 shadow-lg shadow-indigo-500/20 z-20 flex items-center justify-center transition-[width,height] duration-75"
+          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-400/60 bg-emerald-500/8 z-20 flex items-center justify-center transition-[width,height] duration-75"
         >
           {/* Inner falloff pressure ring */}
           <div
             style={{ width: `${settings.size * 0.5}px`, height: `${settings.size * 0.5}px` }}
-            className="rounded-full border border-indigo-300/40 bg-indigo-400/5"
+            className="rounded-full border border-emerald-400/25 bg-emerald-400/5"
           />
           {/* Precision crosshair guides */}
-          <div className="absolute w-full h-[1px] bg-indigo-400/30" />
-          <div className="absolute h-full w-[1px] bg-indigo-400/30" />
+          <div className="absolute w-full h-[1px] bg-emerald-400/20" />
+          <div className="absolute h-full w-[1px] bg-emerald-400/20" />
           {/* Center focal dot */}
-          <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full absolute shadow-sm border border-slate-900" />
+          <div className="w-1 h-1 bg-emerald-300 rounded-full absolute" />
         </div>
       )}
 

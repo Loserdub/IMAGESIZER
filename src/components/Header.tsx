@@ -7,7 +7,6 @@ import {
   Grid, 
   Download, 
   Upload, 
-  Image as ImageIcon,
   Sliders,
   RotateCcw
 } from 'lucide-react';
@@ -57,25 +56,25 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-16 px-4 md:px-6 bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-lg flex items-center justify-between z-30 shrink-0 select-none">
+    <header className="h-14 px-4 md:px-5 bg-neutral-950/95 border-b border-emerald-900/30 backdrop-blur-xl flex items-center justify-between z-30 shrink-0 select-none">
       {/* Left: Branding & Upload */}
-      <div className="flex items-center gap-3 md:gap-5">
+      <div className="flex items-center gap-3 md:gap-4">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Sparkles className="w-5 h-5 text-white" />
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+            <Sparkles className="w-4 h-4 text-emerald-400" />
           </div>
           <div>
-            <h1 className="font-bold text-base md:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-indigo-200 bg-clip-text text-transparent">
-              ImageSizer <span className="text-indigo-400 font-medium text-xs md:text-sm">Liquify</span>
+            <h1 className="font-semibold text-sm md:text-[15px] tracking-tight text-neutral-100">
+              ImageSizer <span className="text-emerald-400 font-normal text-xs">Liquify</span>
             </h1>
-            <p className="hidden md:block text-[11px] text-slate-400 -mt-1">
-              Real-time WebGL Warp & Distortion Engine
+            <p className="hidden md:block text-[10px] text-neutral-500 -mt-0.5">
+              WebGL Warp & Distortion Engine
             </p>
           </div>
         </div>
 
         {/* Upload & Sample Selector */}
-        <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-slate-800">
+        <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-neutral-800/60">
           <input
             type="file"
             ref={fileInputRef}
@@ -85,10 +84,10 @@ export const Header: React.FC<HeaderProps> = ({
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/60 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 transition-all cursor-pointer"
           >
-            <Upload className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Upload Image</span>
+            <Upload className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Upload</span>
           </button>
 
           {/* Sample selector */}
@@ -97,10 +96,10 @@ export const Header: React.FC<HeaderProps> = ({
               const selected = sampleImages.find(s => s.id === e.target.value);
               if (selected) onSelectSample(selected);
             }}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 border border-slate-700/60 focus:outline-none focus:border-indigo-500 cursor-pointer"
+            className="px-2 py-1.5 rounded-lg text-xs font-medium bg-neutral-900 text-neutral-400 border border-neutral-800 focus:outline-none focus:border-emerald-600 cursor-pointer"
             defaultValue=""
           >
-            <option value="" disabled>Load Demo Image...</option>
+            <option value="" disabled>Demo...</option>
             {sampleImages.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -111,13 +110,13 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Center: History & Hold to Compare */}
-      <div className="flex items-center gap-1.5 md:gap-2">
+      <div className="flex items-center gap-1">
         {/* Undo */}
         <button
           onClick={onUndo}
           disabled={!canUndo}
           title="Undo (Ctrl+Z)"
-          className="p-2 rounded-xl text-slate-300 hover:text-white bg-slate-800/60 hover:bg-slate-700/80 border border-slate-700/50 disabled:opacity-40 disabled:hover:bg-slate-800/60 transition-all cursor-pointer"
+          className="p-2 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800/80 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
         >
           <Undo2 className="w-4 h-4" />
         </button>
@@ -127,7 +126,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onRedo}
           disabled={!canRedo}
           title="Redo (Ctrl+Y)"
-          className="p-2 rounded-xl text-slate-300 hover:text-white bg-slate-800/60 hover:bg-slate-700/80 border border-slate-700/50 disabled:opacity-40 disabled:hover:bg-slate-800/60 transition-all cursor-pointer"
+          className="p-2 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800/80 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
         >
           <Redo2 className="w-4 h-4" />
         </button>
@@ -136,12 +135,12 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={onReset}
           title="Reset to Original Image"
-          className="p-2 rounded-xl text-slate-300 hover:text-rose-400 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-700/50 transition-all cursor-pointer"
+          className="p-2 rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-neutral-800/80 transition-all cursor-pointer"
         >
           <RotateCcw className="w-4 h-4" />
         </button>
 
-        <div className="h-5 w-[1px] bg-slate-800 mx-1" />
+        <div className="h-4 w-[1px] bg-neutral-800 mx-1.5" />
 
         {/* Hold to Compare */}
         <button
@@ -150,47 +149,47 @@ export const Header: React.FC<HeaderProps> = ({
           onMouseLeave={onCompareEnd}
           onTouchStart={onCompareStart}
           onTouchEnd={onCompareEnd}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
             isComparing
-              ? 'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/20'
-              : 'bg-slate-800/80 text-slate-300 border-slate-700/60 hover:bg-slate-700 hover:text-white'
+              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/60'
+              : 'bg-transparent text-neutral-400 border-neutral-800 hover:bg-neutral-800/80 hover:text-neutral-200'
           }`}
           title="Hold Spacebar or mouse to compare with original image"
         >
-          <Eye className="w-4 h-4" />
-          <span className="hidden sm:inline">Hold Compare</span>
+          <Eye className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Compare</span>
         </button>
       </div>
 
-      {/* Right: Mesh Toggle, Export, Mobile Upload/Sidebar */}
-      <div className="flex items-center gap-2">
+      {/* Right: Mesh Toggle, Export, Sidebar */}
+      <div className="flex items-center gap-1.5">
         {/* Mesh Grid Overlay Toggle */}
         <button
           onClick={onToggleMesh}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
             showMesh
-              ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500/80 shadow-md shadow-indigo-950/40'
-              : 'bg-slate-800/80 text-slate-400 border-slate-700/60 hover:bg-slate-700 hover:text-slate-200'
+              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/50'
+              : 'bg-transparent text-neutral-500 border-neutral-800 hover:bg-neutral-800/80 hover:text-neutral-300'
           }`}
           title="Toggle Wireframe Mesh Grid Overlay"
         >
-          <Grid className="w-4 h-4" />
-          <span className="hidden md:inline">Mesh Grid</span>
+          <Grid className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Grid</span>
         </button>
 
         {/* High-Res Export */}
         <button
           onClick={onOpenExport}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all cursor-pointer"
         >
-          <Download className="w-4 h-4" />
+          <Download className="w-3.5 h-3.5" />
           <span>Export</span>
         </button>
 
         {/* Desktop Sidebar Toggle */}
         <button
           onClick={onToggleSidebar}
-          className="p-2 rounded-xl text-slate-400 hover:text-slate-200 bg-slate-800/60 border border-slate-700/50 md:flex hidden"
+          className="p-2 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800/80 md:flex hidden transition-all cursor-pointer"
           title="Settings Sidebar"
         >
           <Sliders className="w-4 h-4" />

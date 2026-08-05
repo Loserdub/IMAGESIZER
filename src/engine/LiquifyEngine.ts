@@ -627,7 +627,7 @@ export class LiquifyEngine {
     if (!gl || !this.imageProgram || !this.imageTexture) return;
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.05, 0.05, 0.07, 1.0);
+    gl.clearColor(0.02, 0.04, 0.02, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     // === 1. Draw image ===
