@@ -402,7 +402,7 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
         }
       }}
       className={`relative w-full h-full bg-neutral-950 overflow-hidden select-none touch-none ${
-        toolMode === 'pan' ? (isDraggingRef.current ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-none'
+        toolMode === 'pan' ? (isDraggingRef.current ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-crosshair'
       }`}
     >
       {/* WebGL Canvas — CSS fills container, backing buffer is DPR-scaled (FIX #2) */}
@@ -425,12 +425,11 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
       {cursorPos.visible && toolMode !== 'pan' && (
         <div
           style={{
-            left: `${cursorPos.x}px`,
-            top:  `${cursorPos.y}px`,
+            transform: `translate3d(${cursorPos.x}px, ${cursorPos.y}px, 0) translate(-50%, -50%)`,
             width:  `${settings.size}px`,
             height: `${settings.size}px`
           }}
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-400/60 bg-emerald-500/8 z-20 flex items-center justify-center transition-[width,height] duration-75"
+          className="pointer-events-none absolute top-0 left-0 rounded-full border border-emerald-400/60 bg-emerald-500/8 z-20 flex items-center justify-center transition-[width,height] duration-75"
         >
           {/* Inner falloff pressure ring */}
           <div
