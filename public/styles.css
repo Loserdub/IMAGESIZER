@@ -1,0 +1,81 @@
+/* ImageSizer Liquify - Standalone Dark Theme & Touch Action Overrides */
+
+:root {
+  --bg-primary: #020617;
+  --bg-surface: #0f172a;
+  --bg-card: #1e293b;
+  --border-color: rgba(51, 65, 85, 0.6);
+  --accent-indigo: #6366f1;
+  --accent-violet: #8b5cf6;
+  --accent-emerald: #10b981;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  touch-action: none; /* Disable default touch pan/zoom on body */
+}
+
+/* Full Viewport Canvas Container */
+.liquify-viewport {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #020617;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.liquify-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* Reticle & Cursor Overlays */
+.reticle-cursor {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid rgba(129, 140, 248, 0.8);
+  background-color: rgba(99, 102, 241, 0.1);
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.25);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reticle-inner-ring {
+  border-radius: 50%;
+  border: 1px solid rgba(165, 180, 252, 0.4);
+  background-color: rgba(129, 140, 248, 0.05);
+}
+
+.reticle-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #a5b4fc;
+  border-radius: 50%;
+  position: absolute;
+}
