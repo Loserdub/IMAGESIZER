@@ -407,21 +407,15 @@ export class LiquifyEngine {
     gl.disableVertexAttribArray(loc);
   }
 
-  public loadImage(src: string, onLoaded: (dims: { width: number; height: number }) => void) {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      this.originalImage = img;
-      this.imageWidth = img.width;
-      this.imageHeight = img.height;
-      this.simWidth = this.imageWidth;
-      this.simHeight = this.imageHeight;
-      this.createImageTexture(img);
-      onLoaded({ width: img.width, height: img.height });
-      this.render();
-      this.saveHistoryState();
-    };
-    img.src = src;
+  public loadImage(img: HTMLImageElement) {
+    this.originalImage = img;
+    this.imageWidth = img.width;
+    this.imageHeight = img.height;
+    this.simWidth = this.imageWidth;
+    this.simHeight = this.imageHeight;
+    this.createImageTexture(img);
+    this.render();
+    this.saveHistoryState();
   }
 
   private originalImage: HTMLImageElement | null = null;
@@ -833,12 +827,21 @@ export class LiquifyEngine {
   
   public getExportDataUrl(settings: ExportSettings): Promise<string> {
       return new Promise((resolve) => {
-          this.render();
+          // Temporarily resize canvas to original image dimensions for high-res export
+          // In a true fluid sim, you'd upsample the UV field and apply it to a high-res texture
+          // For now, we return the canvas data URL
           resolve(this.canvas.toDataURL(settings.format, settings.quality));
       });
   }
 
   public destroy() {
+    if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
+    }
+    this.history.forEach(item => {
+      if (item.type === 'texture' && item.texture) {
+        this.gl!.deleteTexture(item.texture);
+      }
+    });
   }
 }

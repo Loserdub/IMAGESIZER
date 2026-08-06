@@ -88,10 +88,10 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
       // CSS layout stays at 100%/100% via className.
       const dpr = window.devicePixelRatio || 1;
       const container = containerRef.current;
-      canvasRef.current.width  = Math.round(container.clientWidth  * dpr);
-      canvasRef.current.height = Math.round(container.clientHeight * dpr);
+      canvasRef.current.width  = Math.round(dims.width  * dpr);
+      canvasRef.current.height = Math.round(dims.height * dpr);
 
-      engine.loadImage(img, settingsRef.current.meshGridSize);
+      engine.loadImage(img);
       fitImageToViewport(dims, container.clientWidth, container.clientHeight);
       onHistoryChange();
     };
@@ -101,8 +101,11 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     img.src = imageSrc;
 
     return () => {
-      // On unmount, clear the engine reference (don't destroy — parent manages lifetime)
-      engineRef.current = null;
+      // On unmount, destroy the engine to stop animation frames and clear WebGL resources
+      if (engineRef.current) {
+          engineRef.current.destroy();
+          engineRef.current = null;
+      }
     };
   }, [imageSrc]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -152,10 +155,11 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     const handleResize = () => {
       if (!containerRef.current || !canvasRef.current || !engineRef.current) return;
       const dpr = window.devicePixelRatio || 1;
-      const w = Math.round(containerRef.current.clientWidth  * dpr);
-      const h = Math.round(containerRef.current.clientHeight * dpr);
-      canvasRef.current.width  = w;
-      canvasRef.current.height = h;
+      const dims = imageDimsRef.current;
+      if (dims) {
+        canvasRef.current.width  = Math.round(dims.width  * dpr);
+        canvasRef.current.height = Math.round(dims.height * dpr);
+      }
       engineRef.current.render();
     };
 
@@ -399,8 +403,8 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         style={{
-          width: '100%',
-          height: '100%',
+          width: imageDimsRef.current ? `${imageDimsRef.current.width}px` : '100%',
+          height: imageDimsRef.current ? `${imageDimsRef.current.height}px` : '100%',
           transform: `translate3d(${transform.panX}px, ${transform.panY}px, 0px) scale(${transform.scale})`,
           transformOrigin: '0 0'
         }}
