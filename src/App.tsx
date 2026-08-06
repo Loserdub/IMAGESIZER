@@ -72,7 +72,7 @@ export default function App() {
 
   const handleReset = () => {
     if (engineRef.current) {
-      engineRef.current.resetToOriginal();
+      engineRef.current.reset();
       updateHistoryState();
     }
   };
@@ -80,14 +80,19 @@ export default function App() {
   const handleCompareStart = () => {
     setIsComparing(true);
     if (engineRef.current) {
-      engineRef.current.setComparing(true);
+      // Not implemented in fluid engine yet, but we can add a no-op or implement it
+      if (typeof engineRef.current.setComparing === 'function') {
+         engineRef.current.setComparing(true);
+      }
     }
   };
 
   const handleCompareEnd = () => {
     setIsComparing(false);
     if (engineRef.current) {
-      engineRef.current.setComparing(false);
+      if (typeof engineRef.current.setComparing === 'function') {
+         engineRef.current.setComparing(false);
+      }
     }
   };
 
@@ -125,16 +130,12 @@ export default function App() {
     }
   };
 
-  // Keep mask overlay in sync with settings
+  // Keep settings updated in the engine
   useEffect(() => {
     if (engineRef.current) {
-      engineRef.current.setMaskOverlay(
-        settings.showMask,
-        settings.maskOpacity,
-        settings.maskColor
-      );
+      engineRef.current.updateSettings(settings);
     }
-  }, [settings.showMask, settings.maskOpacity, settings.maskColor]);
+  }, [settings]);
 
   // Keyboard Shortcuts Listener
   useEffect(() => {

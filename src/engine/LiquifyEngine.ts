@@ -670,7 +670,8 @@ export class LiquifyEngine {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.mask.read.texture);
 
-    gl.uniform1f(this.displayProgram.getUniform('uDistortionStrength'), this.currentSettings.distortionStrength);
+    const activeStrength = this.isComparing ? 0.0 : this.currentSettings.distortionStrength;
+    gl.uniform1f(this.displayProgram.getUniform('uDistortionStrength'), activeStrength);
     gl.uniform1f(this.displayProgram.getUniform('uShowMask'), this.currentSettings.showMask ? 1.0 : 0.0);
     gl.uniform1f(this.displayProgram.getUniform('uMaskOpacity'), this.currentSettings.maskOpacity);
     const mColor = this.parseColor(this.currentSettings.maskColor);
@@ -792,6 +793,22 @@ export class LiquifyEngine {
     this.mask.swap();
     
     this.saveHistoryState();
+  }
+
+  public clearMask() {
+    this.clearProgram.bind();
+    this.gl!.bindTexture(this.gl!.TEXTURE_2D, this.mask.read.texture);
+    this.blit(this.mask.write.fbo, this.clearProgram);
+    this.mask.swap();
+    this.blit(this.mask.write.fbo, this.clearProgram);
+    this.mask.swap();
+  }
+
+  private isComparing = false;
+
+  public setComparing(isComparing: boolean) {
+    this.isComparing = isComparing;
+    this.render();
   }
 
   private restoreHistoryState(item: { type: 'texture' | 'array'; texture?: WebGLTexture; data?: Float32Array }) {

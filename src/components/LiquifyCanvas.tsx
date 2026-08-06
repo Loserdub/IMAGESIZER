@@ -106,23 +106,7 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     };
   }, [imageSrc]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep mesh overlay in sync with settings
-  useEffect(() => {
-    if (engineRef.current) {
-      engineRef.current.setMeshOverlay(
-        settings.meshOverlay,
-        settings.meshOpacity,
-        settings.meshColor
-      );
-    }
-  }, [settings.meshOverlay, settings.meshOpacity, settings.meshColor]);
 
-  // Keep grid size in sync with settings
-  useEffect(() => {
-    if (engineRef.current) {
-      engineRef.current.setGridSize(settings.meshGridSize);
-    }
-  }, [settings.meshGridSize]);
 
   // Clear touch reticle offset if offset is disabled in settings
   useEffect(() => {
