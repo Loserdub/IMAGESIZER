@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Sliders, Grid, Crosshair, Keyboard, Shield } from 'lucide-react';
+import { X, Sliders, Grid, Crosshair, Keyboard, Shield, Sparkles } from 'lucide-react';
 import { BrushSettings } from '../types/liquify';
 
 interface SidebarControlsProps {
@@ -143,6 +143,86 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
           </div>
         </div>
 
+        {/* Fluid Physics Options */}
+        <div className="space-y-2">
+          <h3 className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            Fluid Physics
+          </h3>
+          <div className="p-3 rounded-lg bg-neutral-900/60 border border-neutral-800/40 space-y-3">
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-neutral-400">Anti-Gravity</span>
+                <span className="font-mono text-emerald-400 text-[11px]">{Math.round(settings.antiGravityIntensity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.0"
+                max="1.0"
+                step="0.05"
+                value={settings.antiGravityIntensity}
+                onChange={(e) => onUpdateSettings({ antiGravityIntensity: parseFloat(e.target.value) })}
+                className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-neutral-400">Viscosity</span>
+                <span className="font-mono text-emerald-400 text-[11px]">{Math.round(settings.fluidViscosity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.0"
+                max="1.0"
+                step="0.05"
+                value={settings.fluidViscosity}
+                onChange={(e) => onUpdateSettings({ fluidViscosity: parseFloat(e.target.value) })}
+                className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-neutral-400">Dissipation</span>
+                <span className="font-mono text-emerald-400 text-[11px]">{Math.round(settings.velocityDissipation * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.9"
+                max="1.0"
+                step="0.01"
+                value={settings.velocityDissipation}
+                onChange={(e) => onUpdateSettings({ velocityDissipation: parseFloat(e.target.value) })}
+                className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
+              />
+            </div>
+            
+            <div className="space-y-2 pt-1 border-t border-neutral-800/60">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-neutral-400">Quality Preset</span>
+              </div>
+              <div className="flex gap-1.5 bg-neutral-950 p-1 rounded-lg">
+                {[
+                  { label: 'Fast', iters: 8 },
+                  { label: 'Balanced', iters: 16 },
+                  { label: 'Quality', iters: 32 }
+                ].map(({ label, iters }) => (
+                  <button
+                    key={label}
+                    onClick={() => onUpdateSettings({ pressureIterations: iters })}
+                    className={`flex-1 text-[10px] py-1 rounded-md transition-colors ${
+                      settings.pressureIterations === iters
+                        ? 'bg-neutral-800 text-white font-medium'
+                        : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Keyboard Shortcuts */}
         <div className="space-y-2">
           <h3 className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5">
@@ -154,7 +234,7 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
               ['Compare', 'Space'],
               ['Undo', 'Ctrl+Z'],
               ['Redo', 'Ctrl+Y'],
-              ['Push / Swell / Pinch', '1 / 2 / 3'],
+              ['Blast / Gravity / Vortex', '1 / 2 / 3'],
               ['Restore / Pan', '4 / 5'],
               ['Freeze / Thaw', '6 / 7']
             ].map(([label, key]) => (

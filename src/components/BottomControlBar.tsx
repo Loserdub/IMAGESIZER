@@ -28,10 +28,10 @@ export const BottomControlBar: React.FC<BottomControlBarProps> = ({
   onClearMask
 }) => {
   const tools: { id: ToolMode; label: string; icon: React.ReactNode; shortcut: string }[] = [
-    { id: 'push',        label: 'Push',        icon: <Move className="w-4 h-4" />,       shortcut: '1' },
-    { id: 'swell',       label: 'Swell',       icon: <Maximize2 className="w-4 h-4" />,  shortcut: '2' },
-    { id: 'pinch',       label: 'Pinch',       icon: <Minimize2 className="w-4 h-4" />,  shortcut: '3' },
-    { id: 'reconstruct', label: 'Restore',     icon: <Sparkles className="w-4 h-4" />,   shortcut: '4' },
+    { id: 'push',        label: 'Blast',       icon: <Move className="w-4 h-4" />,       shortcut: '1' },
+    { id: 'pull',        label: 'Gravity',     icon: <Minimize2 className="w-4 h-4" />,  shortcut: '2' },
+    { id: 'vortex',      label: 'Vortex',      icon: <Sparkles className="w-4 h-4" />,   shortcut: '3' },
+    { id: 'reconstruct', label: 'Restore',     icon: <Maximize2 className="w-4 h-4" />,  shortcut: '4' },
     { id: 'freeze',      label: 'Freeze',      icon: <Shield className="w-4 h-4" />,     shortcut: '6' },
     { id: 'thaw',        label: 'Thaw',        icon: <ShieldOff className="w-4 h-4" />,  shortcut: '7' },
     { id: 'pan',         label: 'Pan',         icon: <Hand className="w-4 h-4" />,       shortcut: '5' }

@@ -28,7 +28,14 @@ export default function App() {
     meshColor: '#10b981',
     showMask: true,
     maskOpacity: 0.35,
-    maskColor: '#ef4444'
+    maskColor: '#ef4444',
+    antiGravityIntensity: 0.5,
+    antiGravityDirection: Math.PI / 2, // Straight up
+    fluidViscosity: 0.2,
+    densityDissipation: 0.98,
+    velocityDissipation: 0.99,
+    distortionStrength: 1.0,
+    pressureIterations: 16
   });
 
   // History & Compare State

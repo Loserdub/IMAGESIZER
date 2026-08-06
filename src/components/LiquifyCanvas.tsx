@@ -253,7 +253,8 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     if (mode !== 'pan' && engineRef.current) {
       const { normX, normY }   = screenToNormImage(screenX, screenY);
       const normRadius         = screenRadiusToNorm(s.size / 2);
-      engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength, mode);
+      const aspect             = (canvasRef.current?.width || 1) / (canvasRef.current?.height || 1);
+      engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength, mode, aspect);
     }
   };
 
@@ -294,7 +295,8 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
       const normDragX  = dx / (dims.width  * t.scale);
       const normDragY  = dy / (dims.height * t.scale);
       const normRadius = screenRadiusToNorm(s.size / 2);
-      engineRef.current.applyWarp(normX, normY, normDragX, normDragY, normRadius, s.strength, mode);
+      const aspect     = (canvasRef.current?.width || 1) / (canvasRef.current?.height || 1);
+      engineRef.current.applyWarp(normX, normY, normDragX, normDragY, normRadius, s.strength, mode, aspect);
     }
 
     lastPointRef.current = { x: screenX, y: screenY };

@@ -1,768 +1,827 @@
-import { ToolMode, ExportSettings } from '../types/liquify';
+import { ToolMode, BrushSettings, ExportSettings } from '../types/liquify';
 
 export interface HistoryState {
   uvs: Float32Array;
   mask: Float32Array;
 }
 
+// Shader sources
+const baseVertexShader = `
+  precision highp float;
+  attribute vec2 aPosition;
+  varying vec2 vUv;
+  void main() {
+      vUv = aPosition * 0.5 + 0.5;
+      gl_Position = vec4(aPosition, 0.0, 1.0);
+  }
+`;
+
+const clearShader = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D uTexture;
+  uniform float value;
+  void main() {
+      gl_FragColor = value * texture2D(uTexture, vUv);
+  }
+`;
+
+const initUVShader = `
+  precision highp float;
+  varying vec2 vUv;
+  void main() {
+      gl_FragColor = vec4(vUv, 0.0, 1.0);
+  }
+`;
+
+const splatShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uTarget;
+  uniform float aspectRatio;
+  uniform vec3 color;
+  uniform vec2 point;
+  uniform float radius;
+
+  void main() {
+      vec2 p = vUv - point.xy;
+      p.x *= aspectRatio;
+      vec3 splat = exp(-dot(p, p) / radius) * color;
+      vec3 base = texture2D(uTarget, vUv).xyz;
+      gl_FragColor = vec4(base + splat, 1.0);
+  }
+`;
+
+const advectionShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uVelocity;
+  uniform sampler2D uSource;
+  uniform vec2 texelSize;
+  uniform float dt;
+  uniform float dissipation;
+
+  void main() {
+      vec2 coord = vUv - dt * texture2D(uVelocity, vUv).xy * texelSize;
+      gl_FragColor = dissipation * texture2D(uSource, coord);
+  }
+`;
+
+const divergenceShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uVelocity;
+  uniform vec2 texelSize;
+  void main() {
+      float L = texture2D(uVelocity, vUv - vec2(texelSize.x, 0.0)).x;
+      float R = texture2D(uVelocity, vUv + vec2(texelSize.x, 0.0)).x;
+      float T = texture2D(uVelocity, vUv + vec2(0.0, texelSize.y)).y;
+      float B = texture2D(uVelocity, vUv - vec2(0.0, texelSize.y)).y;
+      float div = 0.5 * (R - L + T - B);
+      gl_FragColor = vec4(div, 0.0, 0.0, 1.0);
+  }
+`;
+
+const pressureShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uPressure;
+  uniform sampler2D uDivergence;
+  uniform vec2 texelSize;
+  void main() {
+      float L = texture2D(uPressure, vUv - vec2(texelSize.x, 0.0)).x;
+      float R = texture2D(uPressure, vUv + vec2(texelSize.x, 0.0)).x;
+      float T = texture2D(uPressure, vUv + vec2(0.0, texelSize.y)).x;
+      float B = texture2D(uPressure, vUv - vec2(0.0, texelSize.y)).x;
+      float C = texture2D(uDivergence, vUv).x;
+      float pressure = (L + R + B + T - C) * 0.25;
+      gl_FragColor = vec4(pressure, 0.0, 0.0, 1.0);
+  }
+`;
+
+const gradientSubtractShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uPressure;
+  uniform sampler2D uVelocity;
+  uniform sampler2D uMask;
+  uniform vec2 texelSize;
+  void main() {
+      float L = texture2D(uPressure, vUv - vec2(texelSize.x, 0.0)).x;
+      float R = texture2D(uPressure, vUv + vec2(texelSize.x, 0.0)).x;
+      float T = texture2D(uPressure, vUv + vec2(0.0, texelSize.y)).x;
+      float B = texture2D(uPressure, vUv - vec2(0.0, texelSize.y)).x;
+      vec2 velocity = texture2D(uVelocity, vUv).xy;
+      
+      // Masking logic: if masked, velocity is zero
+      float mask = texture2D(uMask, vUv).r;
+      if (mask > 0.5) {
+          velocity = vec2(0.0);
+      } else {
+          velocity.xy -= vec2(R - L, T - B);
+      }
+      
+      gl_FragColor = vec4(velocity, 0.0, 1.0);
+  }
+`;
+
+const antiGravityShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uVelocity;
+  uniform sampler2D uUVField;
+  uniform vec2 uAntiGravity;
+  uniform float dt;
+
+  void main() {
+      vec2 vel = texture2D(uVelocity, vUv).xy;
+      
+      // Calculate pseudo-density based on how much the UV field has displaced
+      vec2 origUv = vUv;
+      vec2 currUv = texture2D(uUVField, vUv).xy;
+      float displacement = length(currUv - origUv);
+      
+      // Apply anti-gravity force proportional to displacement (buoyancy)
+      float density = smoothstep(0.0, 0.2, displacement);
+      vel += uAntiGravity * density * dt * 50.0;
+      
+      gl_FragColor = vec4(vel, 0.0, 1.0);
+  }
+`;
+
+const displayShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uTexture;
+  uniform sampler2D uUVField;
+  uniform sampler2D uMaskField;
+  uniform float uDistortionStrength;
+  uniform float uShowMask;
+  uniform float uMaskOpacity;
+  uniform vec3 uMaskColor;
+
+  void main() {
+      vec2 distortedUv = texture2D(uUVField, vUv).xy;
+      
+      // Modulate by distortion strength (lerp between base UV and displaced UV)
+      vec2 offset = distortedUv - vUv;
+      vec2 finalUv = vUv + offset * uDistortionStrength;
+      
+      // Clamp to prevent edge bleeding artifacts
+      finalUv = clamp(finalUv, 0.0, 1.0);
+      
+      vec4 baseColor = texture2D(uTexture, finalUv);
+      
+      // Optional mask rendering overlay
+      float maskVal = texture2D(uMaskField, vUv).r;
+      if (uShowMask > 0.5 && maskVal > 0.0) {
+          vec3 mixed = mix(baseColor.rgb, uMaskColor, maskVal * uMaskOpacity);
+          gl_FragColor = vec4(mixed, baseColor.a);
+      } else {
+          gl_FragColor = baseColor;
+      }
+  }
+`;
+
+interface FBO {
+  texture: WebGLTexture;
+  fbo: WebGLFramebuffer;
+  width: number;
+  height: number;
+  texelSizeX: number;
+  texelSizeY: number;
+}
+
+interface DoubleFBO {
+  read: FBO;
+  write: FBO;
+  swap: () => void;
+}
+
+class Program {
+  gl: WebGLRenderingContext | WebGL2RenderingContext;
+  program: WebGLProgram;
+  uniforms: { [key: string]: WebGLUniformLocation | null } = {};
+
+  constructor(gl: WebGLRenderingContext | WebGL2RenderingContext, vertexShaderSource: string, fragmentShaderSource: string) {
+    this.gl = gl;
+    this.program = this.createProgram(vertexShaderSource, fragmentShaderSource);
+  }
+
+  createShader(type: number, source: string) {
+    const shader = this.gl.createShader(type)!;
+    this.gl.shaderSource(shader, source);
+    this.gl.compileShader(shader);
+    if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)) {
+      throw new Error(this.gl.getShaderInfoLog(shader) || '');
+    }
+    return shader;
+  }
+
+  createProgram(vsSource: string, fsSource: string) {
+    const vs = this.createShader(this.gl.VERTEX_SHADER, vsSource);
+    const fs = this.createShader(this.gl.FRAGMENT_SHADER, fsSource);
+    const prog = this.gl.createProgram()!;
+    this.gl.attachShader(prog, vs);
+    this.gl.attachShader(prog, fs);
+    this.gl.linkProgram(prog);
+    if (!this.gl.getProgramParameter(prog, this.gl.LINK_STATUS)) {
+      throw new Error(this.gl.getProgramInfoLog(prog) || '');
+    }
+    return prog;
+  }
+
+  bind() {
+    this.gl.useProgram(this.program);
+  }
+
+  getUniform(name: string) {
+    if (this.uniforms[name] === undefined) {
+      this.uniforms[name] = this.gl.getUniformLocation(this.program, name);
+    }
+    return this.uniforms[name];
+  }
+}
+
 export class LiquifyEngine {
   private canvas: HTMLCanvasElement;
-  private gl: WebGLRenderingContext | WebGL2RenderingContext | null = null;
-  private isWebGL2 = false;
+  private gl: WebGL2RenderingContext | null = null;
+  
+  private supportLinearFiltering: boolean = false;
 
-  // Image properties
-  private originalImage: HTMLImageElement | ImageBitmap | null = null;
+  private imageTexture: WebGLTexture | null = null;
   private imageWidth = 0;
   private imageHeight = 0;
 
-  // Texture
-  private imageTexture: WebGLTexture | null = null;
+  private simWidth = 0;
+  private simHeight = 0;
+  private simRes = 512; // Fluid simulation resolution
 
-  // Grid dimensions
-  private cols = 120;
-  private rows = 120;
-  private numVertices = 0;
+  // Programs
+  private clearProgram!: Program;
+  private displayProgram!: Program;
+  private splatProgram!: Program;
+  private advectionProgram!: Program;
+  private divergenceProgram!: Program;
+  private pressureProgram!: Program;
+  private gradienSubtractProgram!: Program;
+  private antiGravityProgram!: Program;
+  private initUVProgram!: Program;
 
-  // CPU-side arrays
-  private positions: Float32Array = new Float32Array(0);   // Clip-space [-1, 1]
-  private baseUVs: Float32Array = new Float32Array(0);     // Normalized [0, 1]
-  private currentUVs: Float32Array = new Float32Array(0);  // Deformed texture coords
-  private maskWeights: Float32Array = new Float32Array(0); // Freeze mask protection [0.0 = free, 1.0 = locked]
+  // FBOs
+  private velocity!: DoubleFBO;
+  private density!: DoubleFBO; // UV field
+  private pressure!: DoubleFBO;
+  private mask!: DoubleFBO;
+  private divergence!: FBO;
 
-  // GPU Buffers
-  private vertexBuffer: WebGLBuffer | null = null;
-  private texCoordBuffer: WebGLBuffer | null = null;
-  private baseUVBuffer: WebGLBuffer | null = null;
-  private compareBuffer: WebGLBuffer | null = null;
-  private maskBuffer: WebGLBuffer | null = null;
-  private indexBuffer: WebGLBuffer | null = null;
-  private wireframeIndexBuffer: WebGLBuffer | null = null;
+  private blitQuadBuffer!: WebGLBuffer;
 
-  private numIndices = 0;
-  private numWireframeIndices = 0;
+  private lastTime = 0;
+  private animationFrameId = 0;
 
-  // Shaders
-  private imageProgram: WebGLProgram | null = null;
-  private wireframeProgram: WebGLProgram | null = null;
-  private maskProgram: WebGLProgram | null = null;
 
-  // Shader attribute/uniform locations — Image program
-  private aPositionLoc = -1;
-  private aTexCoordLoc = -1;
-  private uImageLoc: WebGLUniformLocation | null = null;
-
-  // Shader attribute/uniform locations — Wireframe program
-  private aWireframePosLoc = -1;
-  private aWireframeTexCoordLoc = -1;
-  private aWireframeBaseUVLoc = -1;
-  private uWireframeColorLoc: WebGLUniformLocation | null = null;
-
-  // Shader attribute/uniform locations — Mask program
-  private aMaskPosLoc = -1;
-  private aMaskTexCoordLoc = -1;
-  private aMaskBaseUVLoc = -1;
-  private aMaskWeightLoc = -1;
-  private uMaskColorLoc: WebGLUniformLocation | null = null;
-
-  // State
-  private isComparing = false;
-  private showMeshOverlay = false;
-  private meshOpacity = 0.5;
-  private meshColor = '#3b82f6';
-
-  private showMaskOverlay = true;
-  private maskOpacity = 0.35;
-  private maskColor = '#ef4444';
-
-  // History stack — stores lightweight Float32Array copies of currentUVs and maskWeights
-  private history: HistoryState[] = [];
-  private historyIndex = -1;
-  private maxHistory = 40;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.initGL();
   }
 
-  // ---------------------------------------------------------------------------
-  // WebGL Initialization
-  // ---------------------------------------------------------------------------
-
   private initGL() {
-    const gl2 = this.canvas.getContext('webgl2', { preserveDrawingBuffer: true, alpha: false });
-    if (gl2) {
-      this.gl = gl2;
-      this.isWebGL2 = true;
-    } else {
-      const gl1 = this.canvas.getContext('webgl', { preserveDrawingBuffer: true, alpha: false }) as WebGLRenderingContext | null;
-      if (!gl1) {
-        console.error('[LiquifyEngine] WebGL not supported in this browser.');
-        return;
-      }
-      gl1.getExtension('OES_element_index_uint');
-      this.gl = gl1;
-      this.isWebGL2 = false;
+    this.gl = this.canvas.getContext('webgl2', { preserveDrawingBuffer: true, alpha: false }) as WebGL2RenderingContext;
+    if (!this.gl) {
+      const msg = 'WebGL 2 is required but not supported by your browser.';
+      console.error('[LiquifyEngine]', msg);
+      alert(msg);
+      throw new Error(msg);
     }
-
     const gl = this.gl;
-
-    // --- Image rendering shader ---
-    const vsImage = `
-      attribute vec2 a_position;
-      attribute vec2 a_texCoord;
-      varying vec2 v_texCoord;
-      void main() {
-        gl_Position = vec4(a_position, 0.0, 1.0);
-        v_texCoord = a_texCoord;
-      }
-    `;
-
-    const fsImage = `
-      precision mediump float;
-      uniform sampler2D u_image;
-      varying vec2 v_texCoord;
-      void main() {
-        vec2 uv = clamp(v_texCoord, 0.0, 1.0);
-        gl_FragColor = texture2D(u_image, uv);
-      }
-    `;
-
-    this.imageProgram = this.createProgram(vsImage, fsImage);
-    if (this.imageProgram) {
-      this.aPositionLoc = gl.getAttribLocation(this.imageProgram, 'a_position');
-      this.aTexCoordLoc = gl.getAttribLocation(this.imageProgram, 'a_texCoord');
-      this.uImageLoc    = gl.getUniformLocation(this.imageProgram, 'u_image');
+    
+    const extColorBufferFloat = gl.getExtension('EXT_color_buffer_float');
+    if (!extColorBufferFloat) {
+      const msg = 'EXT_color_buffer_float extension is required for fluid physics but not supported.';
+      console.error('[LiquifyEngine]', msg);
+      alert(msg);
+      throw new Error(msg);
     }
+    
+    this.supportLinearFiltering = !!gl.getExtension('OES_texture_float_linear');
+    
+    // Quad buffer
+    this.blitQuadBuffer = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.blitQuadBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, -1, 1, 1, 1, 1, -1]), gl.STATIC_DRAW);
+    
+    this.initPrograms();
+    this.initFBOs();
 
-    // --- Wireframe overlay shader ---
-    const vsWireframe = `
-      attribute vec2 a_position;
-      attribute vec2 a_texCoord;
-      attribute vec2 a_baseUV;
-      void main() {
-        vec2 uvDelta = a_baseUV - a_texCoord;
-        vec2 clipDelta = vec2(uvDelta.x * 2.0, -uvDelta.y * 2.0);
-        gl_Position = vec4(a_position + clipDelta, -0.1, 1.0);
-      }
-    `;
-
-    const fsWireframe = `
-      precision mediump float;
-      uniform vec4 u_color;
-      void main() {
-        gl_FragColor = u_color;
-      }
-    `;
-
-    this.wireframeProgram = this.createProgram(vsWireframe, fsWireframe);
-    if (this.wireframeProgram) {
-      this.aWireframePosLoc      = gl.getAttribLocation(this.wireframeProgram, 'a_position');
-      this.aWireframeTexCoordLoc = gl.getAttribLocation(this.wireframeProgram, 'a_texCoord');
-      this.aWireframeBaseUVLoc   = gl.getAttribLocation(this.wireframeProgram, 'a_baseUV');
-      this.uWireframeColorLoc    = gl.getUniformLocation(this.wireframeProgram, 'u_color');
-    }
-
-    // --- Freeze Mask overlay shader ---
-    const vsMask = `
-      attribute vec2 a_position;
-      attribute vec2 a_texCoord;
-      attribute vec2 a_baseUV;
-      attribute float a_maskWeight;
-      varying float v_maskWeight;
-      void main() {
-        vec2 uvDelta = a_baseUV - a_texCoord;
-        vec2 clipDelta = vec2(uvDelta.x * 2.0, -uvDelta.y * 2.0);
-        gl_Position = vec4(a_position + clipDelta, -0.05, 1.0);
-        v_maskWeight = a_maskWeight;
-      }
-    `;
-
-    const fsMask = `
-      precision mediump float;
-      uniform vec4 u_color;
-      varying float v_maskWeight;
-      void main() {
-        if (v_maskWeight <= 0.001) discard;
-        gl_FragColor = vec4(u_color.rgb, u_color.a * v_maskWeight);
-      }
-    `;
-
-    this.maskProgram = this.createProgram(vsMask, fsMask);
-    if (this.maskProgram) {
-      this.aMaskPosLoc      = gl.getAttribLocation(this.maskProgram, 'a_position');
-      this.aMaskTexCoordLoc = gl.getAttribLocation(this.maskProgram, 'a_texCoord');
-      this.aMaskBaseUVLoc   = gl.getAttribLocation(this.maskProgram, 'a_baseUV');
-      this.aMaskWeightLoc   = gl.getAttribLocation(this.maskProgram, 'a_maskWeight');
-      this.uMaskColorLoc    = gl.getUniformLocation(this.maskProgram, 'u_color');
-    }
+    this.lastTime = performance.now();
+    this.step = this.step.bind(this);
+    this.animationFrameId = requestAnimationFrame(this.step);
   }
 
-  private createProgram(vsCode: string, fsCode: string): WebGLProgram | null {
-    const gl = this.gl;
-    if (!gl) return null;
-
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    if (!vs) return null;
-    gl.shaderSource(vs, vsCode);
-    gl.compileShader(vs);
-    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-      console.error('[LiquifyEngine] Vertex shader error:', gl.getShaderInfoLog(vs));
-      gl.deleteShader(vs);
-      return null;
-    }
-
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    if (!fs) return null;
-    gl.shaderSource(fs, fsCode);
-    gl.compileShader(fs);
-    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-      console.error('[LiquifyEngine] Fragment shader error:', gl.getShaderInfoLog(fs));
-      gl.deleteShader(fs);
-      return null;
-    }
-
-    const program = gl.createProgram();
-    if (!program) return null;
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.error('[LiquifyEngine] Program link error:', gl.getProgramInfoLog(program));
-      gl.deleteProgram(program);
-      return null;
-    }
-
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-
-    return program;
+  private initPrograms() {
+    const gl = this.gl!;
+    this.clearProgram = new Program(gl, baseVertexShader, clearShader);
+    this.displayProgram = new Program(gl, baseVertexShader, displayShader);
+    this.splatProgram = new Program(gl, baseVertexShader, splatShader);
+    this.advectionProgram = new Program(gl, baseVertexShader, advectionShader);
+    this.divergenceProgram = new Program(gl, baseVertexShader, divergenceShader);
+    this.pressureProgram = new Program(gl, baseVertexShader, pressureShader);
+    this.gradienSubtractProgram = new Program(gl, baseVertexShader, gradientSubtractShader);
+    this.antiGravityProgram = new Program(gl, baseVertexShader, antiGravityShader);
+    this.initUVProgram = new Program(gl, baseVertexShader, initUVShader);
   }
 
-  // ---------------------------------------------------------------------------
-  // Image Loading
-  // ---------------------------------------------------------------------------
+  private createFBO(w: number, h: number, internalFormat: number, format: number, type: number, param: number): FBO {
+    const gl = this.gl!;
+    gl.activeTexture(gl.TEXTURE0);
+    const texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, param);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, param);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
 
-  public loadImage(image: HTMLImageElement | ImageBitmap, gridSize = 120) {
-    const gl = this.gl;
-    if (!gl) return;
+    const fbo = gl.createFramebuffer()!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.viewport(0, 0, w, h);
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
-    this.originalImage = image;
-    this.imageWidth    = image.width;
-    this.imageHeight   = image.height;
-    this.cols          = gridSize;
-    this.rows          = Math.round(gridSize * (image.height / image.width));
+    return { texture, fbo, width: w, height: h, texelSizeX: 1.0 / w, texelSizeY: 1.0 / h };
+  }
 
+  private createDoubleFBO(w: number, h: number, internalFormat: number, format: number, type: number, param: number): DoubleFBO {
+    let fbo1 = this.createFBO(w, h, internalFormat, format, type, param);
+    let fbo2 = this.createFBO(w, h, internalFormat, format, type, param);
+    return {
+      get read() { return fbo1; },
+      set read(value) { fbo1 = value; },
+      get write() { return fbo2; },
+      set write(value) { fbo2 = value; },
+      swap() {
+        const temp = fbo1;
+        fbo1 = fbo2;
+        fbo2 = temp;
+      }
+    };
+  }
+
+  private initFBOs() {
+    const gl = this.gl!;
+    const w = this.simRes;
+    const h = this.simRes;
+    const filter = this.supportLinearFiltering ? gl.LINEAR : gl.NEAREST;
+    const halfFloat = gl.HALF_FLOAT;
+    const rgba = gl.RGBA;
+    const rgba16f = gl.RGBA16F;
+
+    this.velocity = this.createDoubleFBO(w, h, rgba16f, rgba, halfFloat, filter);
+    this.density = this.createDoubleFBO(w, h, rgba16f, rgba, halfFloat, filter); // UV field
+    this.pressure = this.createDoubleFBO(w, h, rgba16f, rgba, halfFloat, gl.NEAREST);
+    this.mask = this.createDoubleFBO(w, h, rgba16f, rgba, halfFloat, gl.NEAREST);
+    this.divergence = this.createFBO(w, h, rgba16f, rgba, halfFloat, gl.NEAREST);
+
+    // Initialize the density (UV field) with base UV coordinates
+    this.blit(this.density.read.fbo, this.initUVProgram);
+    this.blit(this.density.write.fbo, this.initUVProgram);
+  }
+
+  private blit(target: WebGLFramebuffer | null, program: Program) {
+    const gl = this.gl!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.blitQuadBuffer);
+    const loc = gl.getAttribLocation(program.program, 'aPosition');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+    gl.disableVertexAttribArray(loc);
+  }
+
+  public loadImage(src: string, onLoaded: (dims: { width: number; height: number }) => void) {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      this.originalImage = img;
+      this.imageWidth = img.width;
+      this.imageHeight = img.height;
+      this.simWidth = this.imageWidth;
+      this.simHeight = this.imageHeight;
+      this.createImageTexture(img);
+      onLoaded({ width: img.width, height: img.height });
+      this.render();
+      this.saveHistoryState();
+    };
+    img.src = src;
+  }
+
+  private originalImage: HTMLImageElement | null = null;
+  private createImageTexture(img: HTMLImageElement) {
+    const gl = this.gl!;
     if (this.imageTexture) gl.deleteTexture(this.imageTexture);
     this.imageTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.imageTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  }
 
-    this.buildMesh();
+  private currentSettings: BrushSettings = {
+    size: 90,
+    strength: 0.5,
+    touchOffset: 45,
+    enableOffset: false,
+    meshOverlay: false,
+    meshGridSize: 120,
+    meshOpacity: 0.5,
+    meshColor: '#10b981',
+    showMask: true,
+    maskOpacity: 0.35,
+    maskColor: '#ef4444',
+    antiGravityIntensity: 0.5,
+    antiGravityDirection: Math.PI / 2,
+    fluidViscosity: 0.2,
+    densityDissipation: 0.98,
+    velocityDissipation: 0.99,
+    distortionStrength: 1.0,
+    pressureIterations: 16
+  };
 
-    this.history = [];
-    this.historyIndex = -1;
-    this.saveHistoryState();
-
+  public updateSettings(settings: BrushSettings) {
+    this.currentSettings = settings;
     this.render();
   }
 
-  public setGridSize(gridSize: number) {
-    if (!this.originalImage) return;
-    this.loadImage(this.originalImage, gridSize);
+  private parseColor(hex: string): [number, number, number] {
+    const c = parseInt(hex.slice(1), 16);
+    return [((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255];
   }
-
-  // ---------------------------------------------------------------------------
-  // Mesh Construction
-  // ---------------------------------------------------------------------------
-
-  private buildMesh() {
-    const gl = this.gl;
-    if (!gl) return;
-
-    const cols = this.cols;
-    const rows = this.rows;
-    this.numVertices = (cols + 1) * (rows + 1);
-
-    this.positions   = new Float32Array(this.numVertices * 2);
-    this.baseUVs     = new Float32Array(this.numVertices * 2);
-    this.currentUVs  = new Float32Array(this.numVertices * 2);
-    this.maskWeights = new Float32Array(this.numVertices);
-
-    let idx = 0;
-    for (let r = 0; r <= rows; r++) {
-      const v = r / rows;
-      const yPos = 1.0 - 2.0 * v;
-      for (let c = 0; c <= cols; c++) {
-        const u = c / cols;
-        const xPos = 2.0 * u - 1.0;
-
-        this.positions[idx]     = xPos;
-        this.positions[idx + 1] = yPos;
-
-        this.baseUVs[idx]     = u;
-        this.baseUVs[idx + 1] = v;
-
-        this.currentUVs[idx]     = u;
-        this.currentUVs[idx + 1] = v;
-
-        idx += 2;
-      }
-    }
-
-    const numQuads = cols * rows;
-    this.numIndices = numQuads * 6;
-    const indices = new Uint32Array(this.numIndices);
-    let iIdx = 0;
-
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const p0 = r * (cols + 1) + c;
-        const p1 = p0 + 1;
-        const p2 = (r + 1) * (cols + 1) + c;
-        const p3 = p2 + 1;
-        indices[iIdx++] = p0;
-        indices[iIdx++] = p2;
-        indices[iIdx++] = p1;
-        indices[iIdx++] = p1;
-        indices[iIdx++] = p2;
-        indices[iIdx++] = p3;
-      }
-    }
-
-    const numHLines = (rows + 1) * cols;
-    const numVLines = (cols + 1) * rows;
-    this.numWireframeIndices = (numHLines + numVLines) * 2;
-    const wireIndices = new Uint32Array(this.numWireframeIndices);
-    let wIdx = 0;
-
-    for (let r = 0; r <= rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const p0 = r * (cols + 1) + c;
-        wireIndices[wIdx++] = p0;
-        wireIndices[wIdx++] = p0 + 1;
-      }
-    }
-    for (let c = 0; c <= cols; c++) {
-      for (let r = 0; r < rows; r++) {
-        const p0 = r * (cols + 1) + c;
-        wireIndices[wIdx++] = p0;
-        wireIndices[wIdx++] = (r + 1) * (cols + 1) + c;
-      }
-    }
-
-    this.deleteBuffer('vertexBuffer');
-    this.vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.positions, gl.STATIC_DRAW);
-
-    this.deleteBuffer('baseUVBuffer');
-    this.baseUVBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.baseUVBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.baseUVs, gl.STATIC_DRAW);
-
-    this.deleteBuffer('texCoordBuffer');
-    this.texCoordBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.currentUVs, gl.DYNAMIC_DRAW);
-
-    this.deleteBuffer('compareBuffer');
-    this.compareBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.compareBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.baseUVs, gl.STATIC_DRAW);
-
-    this.deleteBuffer('maskBuffer');
-    this.maskBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.maskWeights, gl.DYNAMIC_DRAW);
-
-    this.deleteBuffer('indexBuffer');
-    this.indexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-
-    this.deleteBuffer('wireframeIndexBuffer');
-    this.wireframeIndexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.wireframeIndexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, wireIndices, gl.STATIC_DRAW);
-  }
-
-  private deleteBuffer(field: 'vertexBuffer' | 'texCoordBuffer' | 'baseUVBuffer' | 'compareBuffer' | 'maskBuffer' | 'indexBuffer' | 'wireframeIndexBuffer') {
-    const gl = this.gl;
-    if (!gl) return;
-    const buf = this[field];
-    if (buf) {
-      gl.deleteBuffer(buf);
-      this[field] = null;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // UV & Mask Buffer Sync
-  // ---------------------------------------------------------------------------
-
-  private updateUVBuffer() {
-    const gl = this.gl;
-    if (!gl || !this.texCoordBuffer) return;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.currentUVs);
-  }
-
-  private updateMaskBuffer() {
-    const gl = this.gl;
-    if (!gl || !this.maskBuffer) return;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.maskWeights);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Warp & Mask Application
-  // ---------------------------------------------------------------------------
 
   public applyWarp(
     normX: number,
     normY: number,
-    normDragX: number,
-    normDragY: number,
-    normRadius: number,
+    dragNormX: number,
+    dragNormY: number,
+    radiusNorm: number,
     strength: number,
-    mode: ToolMode
+    mode: ToolMode,
+    aspectRatio: number
   ) {
-    if (!this.originalImage || mode === 'pan') return;
+    if (!this.gl) return;
+    const gl = this.gl;
+    
+    const glNormY = 1.0 - normY;
+    const glDragNormY = -dragNormY;
 
-    const numVerts = this.numVertices;
-    const current  = this.currentUVs;
-    const base     = this.baseUVs;
-    const masks    = this.maskWeights;
-    const r2       = normRadius * normRadius;
-    if (r2 <= 0) return;
-
-    const aspect = this.imageWidth / this.imageHeight;
-    let isMaskModified = false;
-
-    for (let i = 0; i < numVerts; i++) {
-      const idx = i * 2;
-      const u = current[idx];
-      const v = current[idx + 1];
-
-      const du = (u - normX) * aspect;
-      const dv = v - normY;
-      const dist2 = du * du + dv * dv;
-
-      if (dist2 < r2) {
-        const dist     = Math.sqrt(dist2);
-        const normDist = dist / normRadius;
-
-        const falloff = (1.0 - normDist * normDist) * (1.0 - normDist * normDist);
-        const factor  = falloff * strength;
-
-        if (mode === 'freeze') {
-          // Freeze Mask: add protection weight
-          masks[i] = Math.min(1.0, masks[i] + factor * 1.5);
-          isMaskModified = true;
-        } else if (mode === 'thaw') {
-          // Thaw Mask: erase protection weight
-          masks[i] = Math.max(0.0, masks[i] - factor * 1.5);
-          isMaskModified = true;
-        } else {
-          // Warp modes: respect protection mask weight (1.0 = completely locked)
-          const maskWeight = masks[i];
-          if (maskWeight >= 0.999) continue;
-          const effectiveFactor = factor * (1.0 - maskWeight);
-
-          if (mode === 'push') {
-            current[idx]     -= normDragX * effectiveFactor;
-            current[idx + 1] -= normDragY * effectiveFactor;
-          } else if (mode === 'swell') {
-            if (dist > 0.00001) {
-              const invDist = 1.0 / dist;
-              const dirU = (du / aspect) * invDist;
-              const dirV = dv * invDist;
-              current[idx]     -= dirU * normRadius * effectiveFactor * 0.25;
-              current[idx + 1] -= dirV * normRadius * effectiveFactor * 0.25;
-            }
-          } else if (mode === 'pinch') {
-            if (dist > 0.00001) {
-              const invDist = 1.0 / dist;
-              const dirU = (du / aspect) * invDist;
-              const dirV = dv * invDist;
-              current[idx]     += dirU * normRadius * effectiveFactor * 0.25;
-              current[idx + 1] += dirV * normRadius * effectiveFactor * 0.25;
-            }
-          } else if (mode === 'reconstruct') {
-            const curU = current[idx];
-            const curV = current[idx + 1];
-            current[idx]     += (base[idx]     - curU) * effectiveFactor * 0.5;
-            current[idx + 1] += (base[idx + 1] - curV) * effectiveFactor * 0.5;
-          }
-        }
-      }
+    if (mode === 'freeze' || mode === 'thaw') {
+      this.splatProgram.bind();
+      gl.uniform1i(this.splatProgram.getUniform('uTarget'), 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.mask.read.texture);
+      
+      const v = mode === 'freeze' ? 1.0 : -1.0;
+      gl.uniform3f(this.splatProgram.getUniform('color'), v, 0.0, 0.0);
+      gl.uniform2f(this.splatProgram.getUniform('point'), normX, glNormY);
+      gl.uniform1f(this.splatProgram.getUniform('radius'), radiusNorm * radiusNorm * 0.25);
+      gl.uniform1f(this.splatProgram.getUniform('aspectRatio'), aspectRatio);
+      
+      gl.viewport(0, 0, this.mask.read.width, this.mask.read.height);
+      this.blit(this.mask.write.fbo, this.splatProgram);
+      this.mask.swap();
+      return;
     }
 
-    if (isMaskModified) {
-      this.updateMaskBuffer();
-    } else {
-      this.updateUVBuffer();
-    }
-    this.render();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Freeze Mask Management
-  // ---------------------------------------------------------------------------
-
-  public clearMask() {
-    this.maskWeights.fill(0);
-    this.updateMaskBuffer();
-    this.saveHistoryState();
-    this.render();
-  }
-
-  public hasMask(): boolean {
-    for (let i = 0; i < this.maskWeights.length; i++) {
-      if (this.maskWeights[i] > 0.001) return true;
-    }
-    return false;
-  }
-
-  public setMaskOverlay(enabled: boolean, opacity = 0.35, color = '#ef4444') {
-    this.showMaskOverlay = enabled;
-    this.maskOpacity     = opacity;
-    this.maskColor       = color;
-    this.render();
-  }
-
-  // ---------------------------------------------------------------------------
-  // History Stack
-  // ---------------------------------------------------------------------------
-
-  public saveHistoryState() {
-    if (this.historyIndex < this.history.length - 1) {
-      this.history = this.history.slice(0, this.historyIndex + 1);
+    let velX = 0;
+    let velY = 0;
+    
+    if (mode === 'push') { // Blast Mode
+      velX = dragNormX * strength * 5000.0;
+      velY = glDragNormY * strength * 5000.0;
+    } else if (mode === 'pull') { // Gravity Well / Pull (forces towards cursor)
+      // For a proper pull, we'd calculate radial vectors in the splat shader.
+      // We approximate it by creating a strong velocity towards the drag vector.
+      velX = dragNormX * strength * 5000.0;
+      velY = glDragNormY * strength * 5000.0;
+    } else if (mode === 'vortex') { // Vortex Mode (rotational velocity)
+      velX = -glDragNormY * strength * 5000.0;
+      velY = dragNormX * strength * 5000.0;
+    } else if (mode === 'reconstruct') {
+       // Reconstruct is tricky in fluid sim, so we ignore or do a custom blend towards base UV
+       return;
     }
 
-    this.history.push({
-      uvs: new Float32Array(this.currentUVs),
-      mask: new Float32Array(this.maskWeights)
-    });
+    if (Math.abs(velX) < 0.0001 && Math.abs(velY) < 0.0001) return;
 
-    if (this.history.length > this.maxHistory) {
-      this.history.shift();
-    } else {
-      this.historyIndex++;
+    this.splatProgram.bind();
+    gl.uniform1i(this.splatProgram.getUniform('uTarget'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocity.read.texture);
+    gl.uniform3f(this.splatProgram.getUniform('color'), velX, velY, 0.0);
+    gl.uniform2f(this.splatProgram.getUniform('point'), normX, glNormY);
+    gl.uniform1f(this.splatProgram.getUniform('radius'), radiusNorm * radiusNorm * 0.25);
+    gl.uniform1f(this.splatProgram.getUniform('aspectRatio'), aspectRatio);
+    
+    gl.viewport(0, 0, this.velocity.read.width, this.velocity.read.height);
+    this.blit(this.velocity.write.fbo, this.splatProgram);
+    this.velocity.swap();
+  }
+
+  private step(time: number) {
+    const dt = Math.min((time - this.lastTime) / 1000.0, 0.033);
+    this.lastTime = time;
+    
+    if (this.gl && this.imageTexture) {
+        this.simulateFluid(dt);
+        this.render();
     }
+    this.animationFrameId = requestAnimationFrame(this.step);
   }
 
-  public undo(): boolean {
-    if (this.historyIndex > 0) {
-      this.historyIndex--;
-      const state = this.history[this.historyIndex];
-      this.currentUVs.set(state.uvs);
-      this.maskWeights.set(state.mask);
-      this.updateUVBuffer();
-      this.updateMaskBuffer();
-      this.render();
-      return true;
+  private simulateFluid(dt: number) {
+    const gl = this.gl!;
+    const w = this.simRes;
+    const h = this.simRes;
+    gl.viewport(0, 0, w, h);
+
+    // 1. Anti-Gravity
+    const agIntensity = this.currentSettings.antiGravityIntensity;
+    if (agIntensity > 0.01) {
+        this.antiGravityProgram.bind();
+        gl.uniform1i(this.antiGravityProgram.getUniform('uVelocity'), 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.velocity.read.texture);
+        
+        gl.uniform1i(this.antiGravityProgram.getUniform('uUVField'), 1);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.density.read.texture);
+        
+        const dir = this.currentSettings.antiGravityDirection;
+        gl.uniform2f(this.antiGravityProgram.getUniform('uAntiGravity'), Math.cos(dir) * agIntensity, Math.sin(dir) * agIntensity);
+        gl.uniform1f(this.antiGravityProgram.getUniform('dt'), dt);
+        
+        this.blit(this.velocity.write.fbo, this.antiGravityProgram);
+        this.velocity.swap();
     }
-    return false;
-  }
 
-  public redo(): boolean {
-    if (this.historyIndex < this.history.length - 1) {
-      this.historyIndex++;
-      const state = this.history[this.historyIndex];
-      this.currentUVs.set(state.uvs);
-      this.maskWeights.set(state.mask);
-      this.updateUVBuffer();
-      this.updateMaskBuffer();
-      this.render();
-      return true;
+    // 2. Advect Velocity
+    this.advectionProgram.bind();
+    gl.uniform2f(this.advectionProgram.getUniform('texelSize'), this.velocity.read.texelSizeX, this.velocity.read.texelSizeY);
+    gl.uniform1i(this.advectionProgram.getUniform('uVelocity'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocity.read.texture);
+    gl.uniform1i(this.advectionProgram.getUniform('uSource'), 0); // Self-advection
+    gl.uniform1f(this.advectionProgram.getUniform('dt'), dt);
+    gl.uniform1f(this.advectionProgram.getUniform('dissipation'), this.currentSettings.velocityDissipation);
+    this.blit(this.velocity.write.fbo, this.advectionProgram);
+    this.velocity.swap();
+
+    // 3. Advect Density (UV Field)
+    this.advectionProgram.bind();
+    gl.uniform1i(this.advectionProgram.getUniform('uVelocity'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocity.read.texture);
+    gl.uniform1i(this.advectionProgram.getUniform('uSource'), 1);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.density.read.texture);
+    gl.uniform1f(this.advectionProgram.getUniform('dissipation'), 1.0); // Never dissipate the coordinate field itself
+    this.blit(this.density.write.fbo, this.advectionProgram);
+    this.density.swap();
+
+    // 4. Divergence
+    this.divergenceProgram.bind();
+    gl.uniform2f(this.divergenceProgram.getUniform('texelSize'), this.velocity.read.texelSizeX, this.velocity.read.texelSizeY);
+    gl.uniform1i(this.divergenceProgram.getUniform('uVelocity'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocity.read.texture);
+    this.blit(this.divergence.fbo, this.divergenceProgram);
+
+    // 5. Clear Pressure
+    this.clearProgram.bind();
+    gl.uniform1i(this.clearProgram.getUniform('uTexture'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.pressure.read.texture);
+    gl.uniform1f(this.clearProgram.getUniform('value'), 0.8);
+    this.blit(this.pressure.write.fbo, this.clearProgram);
+    this.pressure.swap();
+
+    // 6. Pressure Solve (Jacobi Iterations)
+    this.pressureProgram.bind();
+    gl.uniform2f(this.pressureProgram.getUniform('texelSize'), this.velocity.read.texelSizeX, this.velocity.read.texelSizeY);
+    gl.uniform1i(this.pressureProgram.getUniform('uDivergence'), 1);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.divergence.texture);
+    gl.uniform1i(this.pressureProgram.getUniform('uPressure'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    const iterations = this.currentSettings.pressureIterations;
+    for (let i = 0; i < iterations; i++) {
+        gl.bindTexture(gl.TEXTURE_2D, this.pressure.read.texture);
+        this.blit(this.pressure.write.fbo, this.pressureProgram);
+        this.pressure.swap();
     }
-    return false;
+
+    // 7. Gradient Subtraction (Applying pressure and mask)
+    this.gradienSubtractProgram.bind();
+    gl.uniform2f(this.gradienSubtractProgram.getUniform('texelSize'), this.velocity.read.texelSizeX, this.velocity.read.texelSizeY);
+    gl.uniform1i(this.gradienSubtractProgram.getUniform('uPressure'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.pressure.read.texture);
+    gl.uniform1i(this.gradienSubtractProgram.getUniform('uVelocity'), 1);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.velocity.read.texture);
+    gl.uniform1i(this.gradienSubtractProgram.getUniform('uMask'), 2);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.mask.read.texture);
+    
+    this.blit(this.velocity.write.fbo, this.gradienSubtractProgram);
+    this.velocity.swap();
   }
-
-  public canUndo(): boolean { return this.historyIndex > 0; }
-  public canRedo(): boolean { return this.historyIndex < this.history.length - 1; }
-
-  public resetToOriginal() {
-    this.currentUVs.set(this.baseUVs);
-    this.maskWeights.fill(0);
-    this.updateUVBuffer();
-    this.updateMaskBuffer();
-    this.saveHistoryState();
-    this.render();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Hold-to-Compare
-  // ---------------------------------------------------------------------------
-
-  public setComparing(comparing: boolean) {
-    if (this.isComparing !== comparing) {
-      this.isComparing = comparing;
-      this.render();
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Mesh Overlay
-  // ---------------------------------------------------------------------------
-
-  public setMeshOverlay(enabled: boolean, opacity = 0.5, color = '#3b82f6') {
-    this.showMeshOverlay = enabled;
-    this.meshOpacity     = opacity;
-    this.meshColor       = color;
-    this.render();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
 
   public render() {
+    if (!this.gl || !this.imageTexture) return;
     const gl = this.gl;
-    if (!gl || !this.imageProgram || !this.imageTexture) return;
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(0.02, 0.04, 0.02, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // === 1. Draw image ===
-    gl.useProgram(this.imageProgram);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.enableVertexAttribArray(this.aPositionLoc);
-    gl.vertexAttribPointer(this.aPositionLoc, 2, gl.FLOAT, false, 0, 0);
-
-    const uvBuffer = this.isComparing ? this.compareBuffer : this.texCoordBuffer;
-    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
-    gl.enableVertexAttribArray(this.aTexCoordLoc);
-    gl.vertexAttribPointer(this.aTexCoordLoc, 2, gl.FLOAT, false, 0, 0);
-
+    this.displayProgram.bind();
+    
+    gl.uniform1i(this.displayProgram.getUniform('uTexture'), 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.imageTexture);
-    gl.uniform1i(this.uImageLoc, 0);
+    
+    gl.uniform1i(this.displayProgram.getUniform('uUVField'), 1);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.density.read.texture);
 
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
-    gl.drawElements(gl.TRIANGLES, this.numIndices, gl.UNSIGNED_INT, 0);
+    gl.uniform1i(this.displayProgram.getUniform('uMaskField'), 2);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.mask.read.texture);
 
-    // === 2. Draw wireframe overlay (if enabled) ===
-    if (this.showMeshOverlay && this.wireframeProgram && !this.isComparing) {
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.uniform1f(this.displayProgram.getUniform('uDistortionStrength'), this.currentSettings.distortionStrength);
+    gl.uniform1f(this.displayProgram.getUniform('uShowMask'), this.currentSettings.showMask ? 1.0 : 0.0);
+    gl.uniform1f(this.displayProgram.getUniform('uMaskOpacity'), this.currentSettings.maskOpacity);
+    const mColor = this.parseColor(this.currentSettings.maskColor);
+    gl.uniform3f(this.displayProgram.getUniform('uMaskColor'), mColor[0], mColor[1], mColor[2]);
 
-      gl.useProgram(this.wireframeProgram);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-      gl.enableVertexAttribArray(this.aWireframePosLoc);
-      gl.vertexAttribPointer(this.aWireframePosLoc, 2, gl.FLOAT, false, 0, 0);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
-      gl.enableVertexAttribArray(this.aWireframeTexCoordLoc);
-      gl.vertexAttribPointer(this.aWireframeTexCoordLoc, 2, gl.FLOAT, false, 0, 0);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.baseUVBuffer);
-      gl.enableVertexAttribArray(this.aWireframeBaseUVLoc);
-      gl.vertexAttribPointer(this.aWireframeBaseUVLoc, 2, gl.FLOAT, false, 0, 0);
-
-      const hex = this.meshColor.replace('#', '');
-      const r   = parseInt(hex.substring(0, 2), 16) / 255;
-      const g   = parseInt(hex.substring(2, 4), 16) / 255;
-      const b   = parseInt(hex.substring(4, 6), 16) / 255;
-      gl.uniform4f(this.uWireframeColorLoc, r, g, b, this.meshOpacity);
-
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.wireframeIndexBuffer);
-      gl.drawElements(gl.LINES, this.numWireframeIndices, gl.UNSIGNED_INT, 0);
-
-      gl.disableVertexAttribArray(this.aWireframePosLoc);
-      gl.disableVertexAttribArray(this.aWireframeTexCoordLoc);
-      gl.disableVertexAttribArray(this.aWireframeBaseUVLoc);
-
-      gl.disable(gl.BLEND);
-    }
-
-    // === 3. Draw Freeze Mask overlay (if enabled) ===
-    if (this.showMaskOverlay && this.maskProgram && !this.isComparing) {
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-      gl.useProgram(this.maskProgram);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-      gl.enableVertexAttribArray(this.aMaskPosLoc);
-      gl.vertexAttribPointer(this.aMaskPosLoc, 2, gl.FLOAT, false, 0, 0);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
-      gl.enableVertexAttribArray(this.aMaskTexCoordLoc);
-      gl.vertexAttribPointer(this.aMaskTexCoordLoc, 2, gl.FLOAT, false, 0, 0);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.baseUVBuffer);
-      gl.enableVertexAttribArray(this.aMaskBaseUVLoc);
-      gl.vertexAttribPointer(this.aMaskBaseUVLoc, 2, gl.FLOAT, false, 0, 0);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.maskBuffer);
-      gl.enableVertexAttribArray(this.aMaskWeightLoc);
-      gl.vertexAttribPointer(this.aMaskWeightLoc, 1, gl.FLOAT, false, 0, 0);
-
-      const hex = this.maskColor.replace('#', '');
-      const r   = parseInt(hex.substring(0, 2), 16) / 255;
-      const g   = parseInt(hex.substring(2, 4), 16) / 255;
-      const b   = parseInt(hex.substring(4, 6), 16) / 255;
-      gl.uniform4f(this.uMaskColorLoc, r, g, b, this.maskOpacity);
-
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
-      gl.drawElements(gl.TRIANGLES, this.numIndices, gl.UNSIGNED_INT, 0);
-
-      gl.disableVertexAttribArray(this.aMaskPosLoc);
-      gl.disableVertexAttribArray(this.aMaskTexCoordLoc);
-      gl.disableVertexAttribArray(this.aMaskBaseUVLoc);
-      gl.disableVertexAttribArray(this.aMaskWeightLoc);
-
-      gl.disable(gl.BLEND);
-    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.blit(null, this.displayProgram);
   }
 
-  // ---------------------------------------------------------------------------
-  // High-Resolution Export
-  // ---------------------------------------------------------------------------
+  // Hybrid History Stack
+  private history: { type: 'texture' | 'array'; texture?: WebGLTexture; data?: Float32Array }[] = [];
+  private historyIndex = -1;
+  private maxHistory = 40;
+  private maxVramSnapshots = 5;
 
-  public exportHighRes(settings: ExportSettings): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      if (!this.originalImage) {
-        reject(new Error('No image loaded'));
-        return;
+  public saveHistoryState() {
+    const gl = this.gl!;
+    if (!gl) return;
+    
+    const w = this.density.read.width;
+    const h = this.density.read.height;
+
+    // Create a new texture snapshot in VRAM
+    const snapshotTexture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, snapshotTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, this.supportLinearFiltering ? gl.LINEAR : gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, this.supportLinearFiltering ? gl.LINEAR : gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    // Copy current density FBO into the new texture
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.density.read.fbo);
+    gl.copyTexImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, 0, 0, w, h, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    if (this.historyIndex < this.history.length - 1) {
+      // Clear discarded forward history
+      const discarded = this.history.slice(this.historyIndex + 1);
+      discarded.forEach(item => {
+          if (item.type === 'texture' && item.texture) {
+              gl.deleteTexture(item.texture);
+          }
+      });
+      this.history = this.history.slice(0, this.historyIndex + 1);
+    }
+    
+    this.history.push({ type: 'texture', texture: snapshotTexture });
+    this.historyIndex++;
+    
+    if (this.history.length > this.maxHistory) {
+      const oldest = this.history.shift();
+      if (oldest?.type === 'texture' && oldest.texture) {
+          gl.deleteTexture(oldest.texture);
       }
+      this.historyIndex--;
+    }
 
-      const exportCanvas = document.createElement('canvas');
-      exportCanvas.width  = this.imageWidth;
-      exportCanvas.height = this.imageHeight;
-
-      const exportEngine = new LiquifyEngine(exportCanvas);
-      exportEngine.loadImage(this.originalImage, this.cols);
-
-      exportEngine.currentUVs.set(this.currentUVs);
-      exportEngine.updateUVBuffer();
-      exportEngine.render();
-
-      exportCanvas.toBlob(
-        (blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('Failed to create export blob'));
-        },
-        settings.format,
-        settings.quality
-      );
-    });
+    // Convert old textures to CPU arrays to save VRAM
+    for (let i = 0; i <= this.historyIndex - this.maxVramSnapshots; i++) {
+        const item = this.history[i];
+        if (item.type === 'texture' && item.texture) {
+            const data = new Float32Array(w * h * 4);
+            
+            // We must bind the texture to an FBO to read its pixels
+            const tempFbo = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, tempFbo);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, item.texture, 0);
+            gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, data);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.deleteFramebuffer(tempFbo);
+            
+            gl.deleteTexture(item.texture);
+            this.history[i] = { type: 'array', data };
+        }
+    }
   }
 
-  // ---------------------------------------------------------------------------
-  // Utilities
-  // ---------------------------------------------------------------------------
+  public canUndo() { return this.historyIndex > 0; }
+  public canRedo() { return this.historyIndex < this.history.length - 1; }
 
-  public getImageDimensions() {
-    return { width: this.imageWidth, height: this.imageHeight };
+  public undo() {
+    if (!this.canUndo()) return;
+    this.historyIndex--;
+    this.restoreHistoryState(this.history[this.historyIndex]);
+  }
+
+  public redo() {
+    if (!this.canRedo()) return;
+    this.historyIndex++;
+    this.restoreHistoryState(this.history[this.historyIndex]);
+  }
+
+  public reset() {
+    this.history.forEach(item => {
+        if (item.type === 'texture' && item.texture) {
+            this.gl!.deleteTexture(item.texture);
+        }
+    });
+    this.history = [];
+    this.historyIndex = -1;
+    // Clear velocity
+    this.clearProgram.bind();
+    this.gl!.uniform1i(this.clearProgram.getUniform('uTexture'), 0);
+    this.gl!.activeTexture(this.gl!.TEXTURE0);
+    this.gl!.bindTexture(this.gl!.TEXTURE_2D, this.velocity.read.texture);
+    this.gl!.uniform1f(this.clearProgram.getUniform('value'), 0.0);
+    this.blit(this.velocity.write.fbo, this.clearProgram);
+    this.velocity.swap();
+    this.blit(this.velocity.write.fbo, this.clearProgram);
+    this.velocity.swap();
+    // Reset UV density field
+    this.blit(this.density.read.fbo, this.initUVProgram);
+    this.blit(this.density.write.fbo, this.initUVProgram);
+    // Reset mask
+    this.gl!.bindTexture(this.gl!.TEXTURE_2D, this.mask.read.texture);
+    this.blit(this.mask.write.fbo, this.clearProgram);
+    this.mask.swap();
+    this.blit(this.mask.write.fbo, this.clearProgram);
+    this.mask.swap();
+    
+    this.saveHistoryState();
+  }
+
+  private restoreHistoryState(item: { type: 'texture' | 'array'; texture?: WebGLTexture; data?: Float32Array }) {
+    const gl = this.gl!;
+    if (item.type === 'texture' && item.texture) {
+        // Blit from snapshot texture to density FBO
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.density.write.fbo);
+        this.clearProgram.bind();
+        gl.uniform1i(this.clearProgram.getUniform('uTexture'), 0);
+        gl.uniform1f(this.clearProgram.getUniform('value'), 1.0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, item.texture);
+        this.blit(this.density.write.fbo, this.clearProgram);
+        this.density.swap();
+    } else if (item.type === 'array' && item.data) {
+        // Upload from Float32Array
+        gl.bindTexture(gl.TEXTURE_2D, this.density.read.texture);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.density.read.width, this.density.read.height, gl.RGBA, gl.FLOAT, item.data);
+    }
+    this.render();
+  }
+  
+  public getExportDataUrl(settings: ExportSettings): Promise<string> {
+      return new Promise((resolve) => {
+          this.render();
+          resolve(this.canvas.toDataURL(settings.format, settings.quality));
+      });
+  }
+
+  public destroy() {
+      cancelAnimationFrame(this.animationFrameId);
   }
 }

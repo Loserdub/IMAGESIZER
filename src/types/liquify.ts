@@ -1,4 +1,4 @@
-export type ToolMode = 'push' | 'swell' | 'pinch' | 'reconstruct' | 'freeze' | 'thaw' | 'pan';
+export type ToolMode = 'push' | 'pull' | 'vortex' | 'reconstruct' | 'freeze' | 'thaw' | 'pan';
 
 export interface BrushSettings {
   size: number; // in screen pixels
@@ -12,6 +12,15 @@ export interface BrushSettings {
   showMask: boolean; // toggle freeze mask overlay
   maskOpacity: number; // 0.1 to 1.0
   maskColor: string; // e.g. '#ef4444'
+  
+  // Fluid Physics Parameters
+  antiGravityIntensity: number; // 0.0 to 1.0
+  antiGravityDirection: number; // Angle in radians
+  fluidViscosity: number; // 0.0 to 1.0
+  densityDissipation: number; // 0.0 to 1.0
+  velocityDissipation: number; // 0.0 to 1.0
+  distortionStrength: number; // 0.0 to 2.0
+  pressureIterations: number; // Performance vs Quality
 }
 
 export interface ViewTransform {
