@@ -153,8 +153,8 @@ export default function App() {
         e.preventDefault();
         handleRedo();
       } else if (e.key === '1') setToolMode('push');
-      else if (e.key === '2') setToolMode('swell');
-      else if (e.key === '3') setToolMode('pinch');
+      else if (e.key === '2') setToolMode('pull');
+      else if (e.key === '3') setToolMode('vortex');
       else if (e.key === '4') setToolMode('reconstruct');
       else if (e.key === '5') setToolMode('pan');
       else if (e.key === '6') setToolMode('freeze');
@@ -206,6 +206,7 @@ export default function App() {
           engineRef={engineRef}
           onHistoryChange={updateHistoryState}
           onImageLoaded={setImageDims}
+          onUploadImage={handleUploadImage}
         />
 
         {/* Sidebar Controls Drawer */}
@@ -215,6 +216,9 @@ export default function App() {
           settings={settings}
           onUpdateSettings={(partial) => setSettings(s => ({ ...s, ...partial }))}
           onResetMesh={handleReset}
+          onUploadImage={handleUploadImage}
+          sampleImages={sampleImages}
+          onSelectSample={handleSelectSample}
         />
       </main>
 

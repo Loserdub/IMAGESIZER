@@ -1,6 +1,6 @@
-import React from 'react';
-import { X, Sliders, Grid, Crosshair, Keyboard, Shield, Sparkles } from 'lucide-react';
-import { BrushSettings } from '../types/liquify';
+import React, { useRef } from 'react';
+import { X, Sliders, Grid, Crosshair, Keyboard, Shield, Sparkles, Upload, Image as ImageIcon } from 'lucide-react';
+import { BrushSettings, SampleImage } from '../types/liquify';
 
 interface SidebarControlsProps {
   isOpen: boolean;
@@ -8,15 +8,29 @@ interface SidebarControlsProps {
   settings: BrushSettings;
   onUpdateSettings: (partial: Partial<BrushSettings>) => void;
   onResetMesh: () => void;
+  onUploadImage?: (file: File) => void;
+  sampleImages?: SampleImage[];
+  onSelectSample?: (sample: SampleImage) => void;
 }
 
 export const SidebarControls: React.FC<SidebarControlsProps> = ({
   isOpen,
   onClose,
   settings,
-  onUpdateSettings
+  onUpdateSettings,
+  onUploadImage,
+  sampleImages,
+  onSelectSample
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!isOpen) return null;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0] && onUploadImage) {
+      onUploadImage(e.target.files[0]);
+    }
+  };
 
   return (
     <aside className="fixed top-14 right-0 bottom-0 z-30 w-72 bg-neutral-950/98 border-l border-neutral-800/50 backdrop-blur-xl p-4 overflow-y-auto text-neutral-200 animate-slide-left">
@@ -34,6 +48,50 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
       </div>
 
       <div className="space-y-5 pt-4">
+        {/* Image Source & Upload */}
+        <div className="space-y-2">
+          <h3 className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5">
+            <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
+            Image Source
+          </h3>
+          <div className="p-3 rounded-lg bg-neutral-900/60 border border-neutral-800/40 space-y-2.5">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="image/*"
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 transition-all cursor-pointer"
+            >
+              <Upload className="w-4 h-4 text-emerald-400" />
+              <span>Upload Custom Image</span>
+            </button>
+
+            {sampleImages && sampleImages.length > 0 && onSelectSample && (
+              <div className="space-y-1">
+                <span className="text-[10px] text-neutral-400">Preset Demo Images:</span>
+                <select
+                  onChange={(e) => {
+                    const selected = sampleImages.find(s => s.id === e.target.value);
+                    if (selected) onSelectSample(selected);
+                  }}
+                  className="w-full px-2 py-1.5 rounded-lg text-xs font-medium bg-neutral-950 text-neutral-300 border border-neutral-800 focus:outline-none focus:border-emerald-600 cursor-pointer"
+                  defaultValue=""
+                >
+                  <option value="" disabled>Select Demo Image...</option>
+                  {sampleImages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
         {/* Protection Mask Settings */}
         <div className="space-y-2">
           <h3 className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5">

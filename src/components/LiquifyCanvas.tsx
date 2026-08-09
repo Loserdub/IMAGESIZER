@@ -1,3 +1,4 @@
+import { Upload } from 'lucide-react';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { LiquifyEngine } from '../engine/LiquifyEngine';
 import { ToolMode, BrushSettings, ViewTransform, ImageDimensions } from '../types/liquify';
@@ -9,6 +10,7 @@ interface LiquifyCanvasProps {
   engineRef: React.MutableRefObject<LiquifyEngine | null>;
   onHistoryChange: () => void;
   onImageLoaded: (dims: ImageDimensions) => void;
+  onUploadImage?: (file: File) => void;
 }
 
 export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
@@ -17,10 +19,12 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
   settings,
   engineRef,
   onHistoryChange,
-  onImageLoaded
+  onImageLoaded,
+  onUploadImage
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Viewport Transform (Zoom & Pan)
   const [transform, setTransform] = useState<ViewTransform>({ scale: 1, panX: 0, panY: 0 });
@@ -376,6 +380,31 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     pinchStartMidRef.current  = null;
   };
 
+  // File Drag & Drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0] && onUploadImage) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('image/')) {
+        onUploadImage(file);
+      }
+    }
+  };
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -386,6 +415,9 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       onPointerLeave={() => {
         if (!isDraggingRef.current) {
           setCursorPos(prev => ({ ...prev, visible: false }));
@@ -455,6 +487,17 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
             strokeWidth="2"
           />
         </svg>
+      )}
+
+      {/* Drag & Drop File Overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-40 bg-emerald-950/80 backdrop-blur-sm border-2 border-dashed border-emerald-400 flex flex-col items-center justify-center p-6 text-center animate-fade-in pointer-events-none">
+          <div className="p-4 rounded-full bg-emerald-500/20 text-emerald-400 mb-3 animate-bounce">
+            <Upload className="w-8 h-8" />
+          </div>
+          <h3 className="text-lg font-bold text-emerald-200">Drop Image Here</h3>
+          <p className="text-xs text-emerald-400/80 mt-1">Release to open and start liquifying</p>
+        </div>
       )}
     </div>
   );

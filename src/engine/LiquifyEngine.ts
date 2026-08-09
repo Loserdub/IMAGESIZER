@@ -53,6 +53,62 @@ const splatShader = `
   }
 `;
 
+const reconstructShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uUVField;
+  uniform float aspectRatio;
+  uniform vec2 point;
+  uniform float radius;
+  uniform float strength;
+
+  void main() {
+      vec2 p = vUv - point.xy;
+      p.x *= aspectRatio;
+      float dist2 = dot(p, p);
+      float falloff = exp(-dist2 / radius);
+      vec4 currentUV = texture2D(uUVField, vUv);
+      vec2 baseUV = vUv;
+      vec2 blended = mix(currentUV.xy, baseUV, falloff * strength * 0.2);
+      gl_FragColor = vec4(blended, 0.0, 1.0);
+  }
+`;
+
+const radialSplatShader = `
+  precision highp float;
+  precision highp sampler2D;
+  varying vec2 vUv;
+  uniform sampler2D uTarget;
+  uniform float aspectRatio;
+  uniform vec2 point;
+  uniform float radius;
+  uniform float strength;
+  uniform float modeType; // 1.0 = Pull (Inward), 2.0 = Vortex (Rotation)
+
+  void main() {
+      vec2 p = vUv - point.xy;
+      vec2 pAspect = p;
+      pAspect.x *= aspectRatio;
+      float dist2 = dot(pAspect, pAspect);
+      float falloff = exp(-dist2 / radius);
+      
+      vec2 vel = vec2(0.0);
+      float len = length(pAspect);
+      if (len > 0.0001) {
+          vec2 dir = p / len;
+          if (modeType > 1.5) { // Vortex rotation
+              vel = vec2(-dir.y, dir.x) * strength * falloff * 100.0;
+          } else { // Pull (Inward attraction)
+              vel = -dir * strength * falloff * 100.0;
+          }
+      }
+      
+      vec3 base = texture2D(uTarget, vUv).xyz;
+      gl_FragColor = vec4(base + vec3(vel, 0.0), 1.0);
+  }
+`;
+
 const advectionShader = `
   precision highp float;
   precision highp sampler2D;
@@ -268,6 +324,8 @@ export class LiquifyEngine {
   private clearProgram!: Program;
   private displayProgram!: Program;
   private splatProgram!: Program;
+  private reconstructProgram!: Program;
+  private radialSplatProgram!: Program;
   private advectionProgram!: Program;
   private divergenceProgram!: Program;
   private pressureProgram!: Program;
@@ -286,8 +344,6 @@ export class LiquifyEngine {
 
   private lastTime = 0;
   private animationFrameId = 0;
-
-
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -332,6 +388,8 @@ export class LiquifyEngine {
     this.clearProgram = new Program(gl, baseVertexShader, clearShader);
     this.displayProgram = new Program(gl, baseVertexShader, displayShader);
     this.splatProgram = new Program(gl, baseVertexShader, splatShader);
+    this.reconstructProgram = new Program(gl, baseVertexShader, reconstructShader);
+    this.radialSplatProgram = new Program(gl, baseVertexShader, radialSplatShader);
     this.advectionProgram = new Program(gl, baseVertexShader, advectionShader);
     this.divergenceProgram = new Program(gl, baseVertexShader, divergenceShader);
     this.pressureProgram = new Program(gl, baseVertexShader, pressureShader);
@@ -398,6 +456,7 @@ export class LiquifyEngine {
 
   private blit(target: WebGLFramebuffer | null, program: Program) {
     const gl = this.gl!;
+    program.bind();
     gl.bindFramebuffer(gl.FRAMEBUFFER, target);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.blitQuadBuffer);
     const loc = gl.getAttribLocation(program.program, 'aPosition');
@@ -497,23 +556,45 @@ export class LiquifyEngine {
       return;
     }
 
+    if (mode === 'reconstruct') {
+      this.reconstructProgram.bind();
+      gl.uniform1i(this.reconstructProgram.getUniform('uUVField'), 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.density.read.texture);
+      gl.uniform2f(this.reconstructProgram.getUniform('point'), normX, glNormY);
+      gl.uniform1f(this.reconstructProgram.getUniform('radius'), radiusNorm * radiusNorm * 0.25);
+      gl.uniform1f(this.reconstructProgram.getUniform('aspectRatio'), aspectRatio);
+      gl.uniform1f(this.reconstructProgram.getUniform('strength'), strength);
+      
+      gl.viewport(0, 0, this.density.read.width, this.density.read.height);
+      this.blit(this.density.write.fbo, this.reconstructProgram);
+      this.density.swap();
+      return;
+    }
+
+    if (mode === 'pull' || mode === 'vortex') {
+      this.radialSplatProgram.bind();
+      gl.uniform1i(this.radialSplatProgram.getUniform('uTarget'), 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.velocity.read.texture);
+      gl.uniform2f(this.radialSplatProgram.getUniform('point'), normX, glNormY);
+      gl.uniform1f(this.radialSplatProgram.getUniform('radius'), radiusNorm * radiusNorm * 0.25);
+      gl.uniform1f(this.radialSplatProgram.getUniform('aspectRatio'), aspectRatio);
+      gl.uniform1f(this.radialSplatProgram.getUniform('strength'), strength);
+      gl.uniform1f(this.radialSplatProgram.getUniform('modeType'), mode === 'vortex' ? 2.0 : 1.0);
+
+      gl.viewport(0, 0, this.velocity.read.width, this.velocity.read.height);
+      this.blit(this.velocity.write.fbo, this.radialSplatProgram);
+      this.velocity.swap();
+      return;
+    }
+
     let velX = 0;
     let velY = 0;
     
     if (mode === 'push') { // Blast Mode
       velX = dragNormX * strength * 5000.0;
       velY = glDragNormY * strength * 5000.0;
-    } else if (mode === 'pull') { // Gravity Well / Pull (forces towards cursor)
-      // For a proper pull, we'd calculate radial vectors in the splat shader.
-      // We approximate it by creating a strong velocity towards the drag vector.
-      velX = dragNormX * strength * 5000.0;
-      velY = glDragNormY * strength * 5000.0;
-    } else if (mode === 'vortex') { // Vortex Mode (rotational velocity)
-      velX = -glDragNormY * strength * 5000.0;
-      velY = dragNormX * strength * 5000.0;
-    } else if (mode === 'reconstruct') {
-       // Reconstruct is tricky in fluid sim, so we ignore or do a custom blend towards base UV
-       return;
     }
 
     if (Math.abs(velX) < 0.0001 && Math.abs(velY) < 0.0001) return;
@@ -796,6 +877,7 @@ export class LiquifyEngine {
     this.mask.swap();
     this.blit(this.mask.write.fbo, this.clearProgram);
     this.mask.swap();
+    this.saveHistoryState();
   }
 
   private isComparing = false;

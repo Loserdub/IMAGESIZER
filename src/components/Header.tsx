@@ -74,7 +74,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Upload & Sample Selector */}
-        <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-neutral-800/60">
+        <div className="flex items-center gap-1.5 sm:gap-2 pl-2 sm:pl-3 border-l border-neutral-800/60">
           <input
             type="file"
             ref={fileInputRef}
@@ -84,10 +84,11 @@ export const Header: React.FC<HeaderProps> = ({
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-500/30 transition-all cursor-pointer"
+            title="Upload custom image file"
           >
             <Upload className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Upload</span>
+            <span className="hidden xs:inline">Upload</span>
           </button>
 
           {/* Sample selector */}
@@ -96,7 +97,7 @@ export const Header: React.FC<HeaderProps> = ({
               const selected = sampleImages.find(s => s.id === e.target.value);
               if (selected) onSelectSample(selected);
             }}
-            className="px-2 py-1.5 rounded-lg text-xs font-medium bg-neutral-900 text-neutral-400 border border-neutral-800 focus:outline-none focus:border-emerald-600 cursor-pointer"
+            className="px-1.5 sm:px-2 py-1.5 rounded-lg text-xs font-medium bg-neutral-900 text-neutral-400 border border-neutral-800 focus:outline-none focus:border-emerald-600 cursor-pointer max-w-[80px] sm:max-w-none"
             defaultValue=""
           >
             <option value="" disabled>Demo...</option>
