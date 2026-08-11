@@ -222,9 +222,24 @@ const displayShader = `
   uniform float uShowMask;
   uniform float uMaskOpacity;
   uniform vec3 uMaskColor;
+  uniform vec2 uSimTexelSize;
+
+  vec2 sampleUVBilinear(vec2 uv) {
+      vec2 st = uv / uSimTexelSize - 0.5;
+      vec2 f = fract(st);
+      vec2 texel = (floor(st) + 0.5) * uSimTexelSize;
+      
+      vec2 t1 = texture2D(uUVField, texel).xy;
+      vec2 t2 = texture2D(uUVField, texel + vec2(uSimTexelSize.x, 0.0)).xy;
+      vec2 b1 = texture2D(uUVField, texel + vec2(0.0, uSimTexelSize.y)).xy;
+      vec2 b2 = texture2D(uUVField, texel + uSimTexelSize).xy;
+      
+      vec2 s = smoothstep(0.0, 1.0, f);
+      return mix(mix(t1, t2, s.x), mix(b1, b2, s.x), s.y);
+  }
 
   void main() {
-      vec2 distortedUv = texture2D(uUVField, vUv).xy;
+      vec2 distortedUv = sampleUVBilinear(vUv);
       
       // Modulate by distortion strength (lerp between base UV and displaced UV)
       vec2 offset = distortedUv - vUv;
@@ -434,10 +449,52 @@ export class LiquifyEngine {
     };
   }
 
-  private initFBOs() {
+  private deleteFBO(fbo: FBO) {
+    if (!this.gl || !fbo) return;
+    this.gl.deleteTexture(fbo.texture);
+    this.gl.deleteFramebuffer(fbo.fbo);
+  }
+
+  private deleteDoubleFBO(dfbo: DoubleFBO) {
+    if (!dfbo) return;
+    this.deleteFBO(dfbo.read);
+    this.deleteFBO(dfbo.write);
+  }
+
+  private computeSimDimensions(imgW: number, imgH: number): { w: number; h: number } {
+    const maxRes = 1024;
+    const aspect = imgW / imgH;
+    let w = maxRes;
+    let h = maxRes;
+    if (aspect >= 1) {
+      w = maxRes;
+      h = Math.max(128, Math.round(maxRes / aspect));
+    } else {
+      h = maxRes;
+      w = Math.max(128, Math.round(maxRes * aspect));
+    }
+    return { w, h };
+  }
+
+  private initFBOs(simW?: number, simH?: number) {
     const gl = this.gl!;
-    const w = this.simRes;
-    const h = this.simRes;
+    if (simW && simH) {
+      this.simWidth = simW;
+      this.simHeight = simH;
+    } else {
+      this.simWidth = this.simRes;
+      this.simHeight = this.simRes;
+    }
+
+    const w = this.simWidth;
+    const h = this.simHeight;
+
+    if (this.velocity) this.deleteDoubleFBO(this.velocity);
+    if (this.density) this.deleteDoubleFBO(this.density);
+    if (this.pressure) this.deleteDoubleFBO(this.pressure);
+    if (this.mask) this.deleteDoubleFBO(this.mask);
+    if (this.divergence) this.deleteFBO(this.divergence);
+
     const filter = this.supportLinearFiltering ? gl.LINEAR : gl.NEAREST;
     const halfFloat = gl.HALF_FLOAT;
     const rgba = gl.RGBA;
@@ -470,8 +527,11 @@ export class LiquifyEngine {
     this.originalImage = img;
     this.imageWidth = img.width;
     this.imageHeight = img.height;
-    this.simWidth = this.imageWidth;
-    this.simHeight = this.imageHeight;
+    
+    // Re-initialize FBOs to match uploaded image aspect ratio with high resolution grid
+    const { w, h } = this.computeSimDimensions(img.width, img.height);
+    this.initFBOs(w, h);
+
     this.createImageTexture(img);
     this.render();
     this.saveHistoryState();
@@ -486,9 +546,10 @@ export class LiquifyEngine {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.generateMipmap(gl.TEXTURE_2D);
   }
 
   private currentSettings: BrushSettings = {
@@ -517,6 +578,16 @@ export class LiquifyEngine {
     this.render();
   }
 
+  private isInteracting = false;
+  private activeStrokeBounds: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
+
+  public setInteracting(interacting: boolean) {
+    this.isInteracting = interacting;
+    if (!interacting) {
+      this.activeStrokeBounds = null;
+    }
+  }
+
   private parseColor(hex: string): [number, number, number] {
     const c = parseInt(hex.slice(1), 16);
     return [((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255];
@@ -537,6 +608,22 @@ export class LiquifyEngine {
     
     const glNormY = 1.0 - normY;
     const glDragNormY = -dragNormY;
+
+    // Track active stroke bounding box for scissor scoping optimization
+    const pad = radiusNorm * 2.0;
+    const minX = Math.max(0, normX - pad);
+    const minY = Math.max(0, glNormY - pad);
+    const maxX = Math.min(1, normX + pad);
+    const maxY = Math.min(1, glNormY + pad);
+
+    if (!this.activeStrokeBounds) {
+      this.activeStrokeBounds = { minX, minY, maxX, maxY };
+    } else {
+      this.activeStrokeBounds.minX = Math.min(this.activeStrokeBounds.minX, minX);
+      this.activeStrokeBounds.minY = Math.min(this.activeStrokeBounds.minY, minY);
+      this.activeStrokeBounds.maxX = Math.max(this.activeStrokeBounds.maxX, maxX);
+      this.activeStrokeBounds.maxY = Math.max(this.activeStrokeBounds.maxY, maxY);
+    }
 
     if (mode === 'freeze' || mode === 'thaw') {
       this.splatProgram.bind();
@@ -626,9 +713,21 @@ export class LiquifyEngine {
 
   private simulateFluid(dt: number) {
     const gl = this.gl!;
-    const w = this.simRes;
-    const h = this.simRes;
+    const w = this.simWidth;
+    const h = this.simHeight;
     gl.viewport(0, 0, w, h);
+
+    // Scissor Scoping Optimization: Scissor compute passes to active stroke region while dragging
+    if (this.isInteracting && this.activeStrokeBounds) {
+      const sX = Math.floor(this.activeStrokeBounds.minX * w);
+      const sY = Math.floor(this.activeStrokeBounds.minY * h);
+      const sW = Math.max(16, Math.ceil((this.activeStrokeBounds.maxX - this.activeStrokeBounds.minX) * w));
+      const sH = Math.max(16, Math.ceil((this.activeStrokeBounds.maxY - this.activeStrokeBounds.minY) * h));
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(sX, sY, sW, sH);
+    } else {
+      gl.disable(gl.SCISSOR_TEST);
+    }
 
     // 1. Anti-Gravity
     const agIntensity = this.currentSettings.antiGravityIntensity;
@@ -691,7 +790,7 @@ export class LiquifyEngine {
     this.blit(this.pressure.write.fbo, this.clearProgram);
     this.pressure.swap();
 
-    // 6. Pressure Solve (Jacobi Iterations)
+    // 6. Pressure Solve (Dynamic LOD: 8 iterations during drag, 24+ when idle)
     this.pressureProgram.bind();
     gl.uniform2f(this.pressureProgram.getUniform('texelSize'), this.velocity.read.texelSizeX, this.velocity.read.texelSizeY);
     gl.uniform1i(this.pressureProgram.getUniform('uDivergence'), 1);
@@ -699,7 +798,11 @@ export class LiquifyEngine {
     gl.bindTexture(gl.TEXTURE_2D, this.divergence.texture);
     gl.uniform1i(this.pressureProgram.getUniform('uPressure'), 0);
     gl.activeTexture(gl.TEXTURE0);
-    const iterations = this.currentSettings.pressureIterations;
+
+    const iterations = this.isInteracting
+      ? Math.min(8, Math.floor(this.currentSettings.pressureIterations / 2))
+      : Math.max(24, this.currentSettings.pressureIterations);
+
     for (let i = 0; i < iterations; i++) {
         gl.bindTexture(gl.TEXTURE_2D, this.pressure.read.texture);
         this.blit(this.pressure.write.fbo, this.pressureProgram);
@@ -721,6 +824,8 @@ export class LiquifyEngine {
     
     this.blit(this.velocity.write.fbo, this.gradienSubtractProgram);
     this.velocity.swap();
+
+    gl.disable(gl.SCISSOR_TEST);
   }
 
   public render() {
@@ -744,6 +849,8 @@ export class LiquifyEngine {
     gl.uniform1i(this.displayProgram.getUniform('uMaskField'), 2);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.mask.read.texture);
+
+    gl.uniform2f(this.displayProgram.getUniform('uSimTexelSize'), this.density.read.texelSizeX, this.density.read.texelSizeY);
 
     const activeStrength = this.isComparing ? 0.0 : this.currentSettings.distortionStrength;
     gl.uniform1f(this.displayProgram.getUniform('uDistortionStrength'), activeStrength);
@@ -909,11 +1016,53 @@ export class LiquifyEngine {
   
   public getExportDataUrl(settings: ExportSettings): Promise<string> {
       return new Promise((resolve) => {
-          // Temporarily resize canvas to original image dimensions for high-res export
-          // In a true fluid sim, you'd upsample the UV field and apply it to a high-res texture
-          // For now, we return the canvas data URL
           resolve(this.canvas.toDataURL(settings.format, settings.quality));
       });
+  }
+
+  public async exportHighRes(settings: ExportSettings): Promise<Blob> {
+    if (!this.gl || !this.imageTexture) {
+      throw new Error('No image loaded to export');
+    }
+
+    const exportW = this.imageWidth || this.canvas.width;
+    const exportH = this.imageHeight || this.canvas.height;
+
+    // Create offscreen canvas at 100% native image resolution
+    const offscreenCanvas = document.createElement('canvas');
+    offscreenCanvas.width = exportW;
+    offscreenCanvas.height = exportH;
+
+    const origW = this.canvas.width;
+    const origH = this.canvas.height;
+
+    // Render WebGL frame at native image resolution
+    this.canvas.width = exportW;
+    this.canvas.height = exportH;
+
+    this.gl.disable(this.gl.SCISSOR_TEST);
+    this.render();
+
+    const ctx = offscreenCanvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(this.canvas, 0, 0);
+    }
+
+    // Restore viewport canvas resolution
+    this.canvas.width = origW;
+    this.canvas.height = origH;
+    this.render();
+
+    return new Promise((resolve, reject) => {
+      offscreenCanvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Export failed to generate Blob'));
+        },
+        settings.format,
+        settings.quality
+      );
+    });
   }
 
   public destroy() {

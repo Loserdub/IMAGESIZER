@@ -243,6 +243,7 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
 
     const mode = toolModeRef.current;
     if (mode !== 'pan' && engineRef.current) {
+      engineRef.current.setInteracting(true);
       const { normX, normY }   = screenToNormImage(screenX, screenY);
       const normRadius         = screenRadiusToNorm(s.size / 2);
       const aspect             = (canvasRef.current?.width || 1) / (canvasRef.current?.height || 1);
@@ -297,6 +298,10 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
   const handlePointerUp = (e: React.PointerEvent) => {
     // FIX #8: Unregister this pointer ID
     activePointerIdsRef.current.delete(e.pointerId);
+
+    if (engineRef.current) {
+      engineRef.current.setInteracting(false);
+    }
 
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
