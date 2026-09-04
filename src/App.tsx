@@ -7,6 +7,7 @@ import { ExportModal } from './components/ExportModal';
 import { SidebarControls } from './components/SidebarControls';
 import { getSampleImages } from './data/sampleImages';
 import { ToolMode, BrushSettings, ExportSettings, ImageDimensions, SampleImage } from './types/liquify';
+import { segmentSubject } from './services/segmentationService';
 
 export default function App() {
   const sampleImages = useRef<SampleImage[]>(getSampleImages()).current;
@@ -29,14 +30,14 @@ export default function App() {
     showMask: true,
     maskOpacity: 0.35,
     maskColor: '#ef4444',
-    antiGravityIntensity: 0.5,
-    antiGravityDirection: Math.PI / 2, // Straight up
-    fluidViscosity: 0.2,
-    densityDissipation: 0.98,
-    velocityDissipation: 0.99,
-    distortionStrength: 1.0,
-    pressureIterations: 16
+    backgroundGuard: false,
+    backgroundGuardFeather: 4,
+    showSubjectMaskPreview: false,
+    hasSubjectMask: false
   });
+
+  // Background Guard State
+  const [isDetectingBody, setIsDetectingBody] = useState(false);
 
   // History & Compare State
   const [canUndo, setCanUndo] = useState(false);
@@ -80,19 +81,14 @@ export default function App() {
   const handleCompareStart = () => {
     setIsComparing(true);
     if (engineRef.current) {
-      // Not implemented in fluid engine yet, but we can add a no-op or implement it
-      if (typeof engineRef.current.setComparing === 'function') {
-         engineRef.current.setComparing(true);
-      }
+      engineRef.current.setComparing(true);
     }
   };
 
   const handleCompareEnd = () => {
     setIsComparing(false);
     if (engineRef.current) {
-      if (typeof engineRef.current.setComparing === 'function') {
-         engineRef.current.setComparing(false);
-      }
+      engineRef.current.setComparing(false);
     }
   };
 
@@ -101,6 +97,7 @@ export default function App() {
     reader.onload = (e) => {
       if (e.target?.result) {
         setImageSrc(e.target.result as string);
+        setSettings(s => ({ ...s, hasSubjectMask: false, backgroundGuard: false }));
       }
     };
     reader.readAsDataURL(file);
@@ -108,6 +105,37 @@ export default function App() {
 
   const handleSelectSample = (sample: SampleImage) => {
     setImageSrc(sample.url);
+    setSettings(s => ({ ...s, hasSubjectMask: false, backgroundGuard: false }));
+  };
+
+  const handleAutoDetectBody = async (feather?: number) => {
+    if (!engineRef.current || isDetectingBody) return;
+    const currentImg = engineRef.current.getImage();
+    if (!currentImg) return;
+
+    setIsDetectingBody(true);
+    try {
+      const radius = feather ?? settings.backgroundGuardFeather ?? 4;
+      const segResult = await segmentSubject(currentImg, radius);
+      engineRef.current.setSubjectMask(segResult.maskCanvas);
+      setSettings(s => ({
+        ...s,
+        backgroundGuard: true,
+        hasSubjectMask: true,
+      }));
+    } catch (err) {
+      console.error('Failed to segment subject body:', err);
+    } finally {
+      setIsDetectingBody(false);
+    }
+  };
+
+  const handleToggleBackgroundGuard = () => {
+    if (!settings.hasSubjectMask) {
+      handleAutoDetectBody();
+    } else {
+      setSettings(s => ({ ...s, backgroundGuard: !s.backgroundGuard }));
+    }
   };
 
   const handleExport = async (exportSettings: ExportSettings) => {
@@ -153,8 +181,8 @@ export default function App() {
         e.preventDefault();
         handleRedo();
       } else if (e.key === '1') setToolMode('push');
-      else if (e.key === '2') setToolMode('pull');
-      else if (e.key === '3') setToolMode('vortex');
+      else if (e.key === '2') setToolMode('swell');
+      else if (e.key === '3') setToolMode('pinch');
       else if (e.key === '4') setToolMode('reconstruct');
       else if (e.key === '5') setToolMode('pan');
       else if (e.key === '6') setToolMode('freeze');
@@ -195,6 +223,11 @@ export default function App() {
         onToggleMesh={() => setSettings(s => ({ ...s, meshOverlay: !s.meshOverlay }))}
         onOpenExport={() => setIsExportOpen(true)}
         onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+        onAutoDetectBody={handleAutoDetectBody}
+        isDetectingBody={isDetectingBody}
+        hasSubjectMask={settings.hasSubjectMask}
+        backgroundGuard={settings.backgroundGuard}
+        onToggleBackgroundGuard={handleToggleBackgroundGuard}
       />
 
       {/* Main Canvas Viewport Area */}
@@ -219,6 +252,8 @@ export default function App() {
           onUploadImage={handleUploadImage}
           sampleImages={sampleImages}
           onSelectSample={handleSelectSample}
+          onAutoDetectBody={handleAutoDetectBody}
+          isDetectingBody={isDetectingBody}
         />
       </main>
 
@@ -229,6 +264,8 @@ export default function App() {
         settings={settings}
         onUpdateSettings={(partial) => setSettings(s => ({ ...s, ...partial }))}
         onClearMask={handleClearMask}
+        onAutoDetectBody={handleAutoDetectBody}
+        isDetectingBody={isDetectingBody}
       />
 
       {/* High Resolution Export Modal */}

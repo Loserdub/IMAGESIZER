@@ -55,6 +55,10 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
   // FIX #8: Track active pointer IDs to reliably detect multi-touch on PointerEvents
   const activePointerIdsRef = useRef<Set<number>>(new Set());
 
+  // Continuous Hold-to-Bloat / Hold-to-Shrink interaction refs
+  const holdRafIdRef = useRef<number | null>(null);
+  const currentFocalPointRef = useRef<{ screenX: number; screenY: number } | null>(null);
+
   // Image dimensions ref (read in event handlers without closure lag)
   const imageDimsRef = useRef<ImageDimensions>({ width: 800, height: 600 });
 
@@ -203,6 +207,47 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
   };
 
   // ---------------------------------------------------------------------------
+  // Continuous Press-and-Hold Animation Loop (for Swell, Pinch, Restore, etc.)
+  // ---------------------------------------------------------------------------
+
+  const stopHoldLoop = useCallback(() => {
+    if (holdRafIdRef.current !== null) {
+      cancelAnimationFrame(holdRafIdRef.current);
+      holdRafIdRef.current = null;
+    }
+  }, []);
+
+  const startHoldLoop = useCallback(() => {
+    stopHoldLoop();
+    const tick = () => {
+      if (!isDraggingRef.current || !currentFocalPointRef.current || !engineRef.current) {
+        stopHoldLoop();
+        return;
+      }
+      const mode = toolModeRef.current;
+      if (mode === 'swell' || mode === 'pinch' || mode === 'reconstruct' || mode === 'freeze' || mode === 'thaw') {
+        const { screenX, screenY } = currentFocalPointRef.current;
+        const s = settingsRef.current;
+        const { normX, normY } = screenToNormImage(screenX, screenY);
+        const normRadius = screenRadiusToNorm(s.size / 2);
+        // Continuous gentle rate per frame for controllable muscle inflation / contouring
+        engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength * 0.25, mode);
+      }
+      holdRafIdRef.current = requestAnimationFrame(tick);
+    };
+    holdRafIdRef.current = requestAnimationFrame(tick);
+  }, [screenToNormImage, screenRadiusToNorm, stopHoldLoop]);
+
+  // Clean up RAF on unmount
+  useEffect(() => {
+    return () => {
+      if (holdRafIdRef.current !== null) {
+        cancelAnimationFrame(holdRafIdRef.current);
+      }
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
   // Pointer Events
   // ---------------------------------------------------------------------------
 
@@ -210,18 +255,23 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     // FIX #8: Register this pointer ID so we can detect multi-touch reliably
     activePointerIdsRef.current.add(e.pointerId);
 
-    // If two or more touch pointers are active, do not start/continue a warp stroke
+    // If two or more touch pointers are active, cancel any in-progress stroke
     if (e.pointerType === 'touch' && activePointerIdsRef.current.size > 1) {
-      // Cancel any in-progress stroke when the second finger lands
+      stopHoldLoop();
       isDraggingRef.current = false;
       lastPointRef.current  = null;
+      currentFocalPointRef.current = null;
       return;
     }
 
     isDraggingRef.current = true;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore if setPointerCapture fails on certain mobile webviews
+    }
 
-    // Container-relative coords (consistent with zoom pivot fix #3)
+    // Container-relative coords
     const rect = containerRef.current?.getBoundingClientRect();
     let screenX = e.clientX - (rect?.left ?? 0);
     let screenY = e.clientY - (rect?.top  ?? 0);
@@ -240,19 +290,24 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
     }
 
     lastPointRef.current = { x: screenX, y: screenY };
+    currentFocalPointRef.current = { screenX, screenY };
 
     const mode = toolModeRef.current;
     if (mode !== 'pan' && engineRef.current) {
       engineRef.current.setInteracting(true);
       const { normX, normY }   = screenToNormImage(screenX, screenY);
       const normRadius         = screenRadiusToNorm(s.size / 2);
-      const aspect             = (canvasRef.current?.width || 1) / (canvasRef.current?.height || 1);
-      engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength, mode, aspect);
+      engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength, mode);
+
+      // Start continuous swelling/pinching/restoring while finger is pressed down
+      if (mode !== 'push') {
+        startHoldLoop();
+      }
     }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    // FIX #8: Ignore move events from non-primary touch pointers during multi-touch
+    // Ignore move events from non-primary touch pointers during multi-touch
     if (e.pointerType === 'touch' && activePointerIdsRef.current.size > 1) return;
 
     const rect = containerRef.current?.getBoundingClientRect();
@@ -274,6 +329,8 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
 
     if (!isDraggingRef.current || !lastPointRef.current) return;
 
+    currentFocalPointRef.current = { screenX, screenY };
+
     const dx = screenX - lastPointRef.current.x;
     const dy = screenY - lastPointRef.current.y;
     const mode = toolModeRef.current;
@@ -288,16 +345,22 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
       const normDragX  = dx / (dims.width  * t.scale);
       const normDragY  = dy / (dims.height * t.scale);
       const normRadius = screenRadiusToNorm(s.size / 2);
-      const aspect     = (canvasRef.current?.width || 1) / (canvasRef.current?.height || 1);
-      engineRef.current.applyWarp(normX, normY, normDragX, normDragY, normRadius, s.strength, mode, aspect);
+
+      if (mode === 'push') {
+        engineRef.current.applyWarp(normX, normY, normDragX, normDragY, normRadius, s.strength, mode);
+      } else {
+        // Continuous deformation during drag stroke
+        engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength, mode);
+      }
     }
 
     lastPointRef.current = { x: screenX, y: screenY };
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    // FIX #8: Unregister this pointer ID
     activePointerIdsRef.current.delete(e.pointerId);
+    stopHoldLoop();
+    currentFocalPointRef.current = null;
 
     if (engineRef.current) {
       engineRef.current.setInteracting(false);
@@ -334,9 +397,10 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
-      // Cancel any active warp stroke when second finger appears
+      stopHoldLoop();
       isDraggingRef.current = false;
       lastPointRef.current  = null;
+      currentFocalPointRef.current = null;
 
       const t1 = e.touches[0];
       const t2 = e.touches[1];
@@ -355,8 +419,10 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    // Always prevent native scroll / pull-to-refresh on mobile canvas
+    e.preventDefault();
+
     if (e.touches.length === 2 && pinchStartDistRef.current && pinchStartMidRef.current) {
-      e.preventDefault(); // Prevent native browser pan during pinch
       const t1 = e.touches[0];
       const t2 = e.touches[1];
       const rect = containerRef.current?.getBoundingClientRect();
@@ -443,9 +509,10 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
           width: imageDimsRef.current ? `${imageDimsRef.current.width}px` : '100%',
           height: imageDimsRef.current ? `${imageDimsRef.current.height}px` : '100%',
           transform: `translate3d(${transform.panX}px, ${transform.panY}px, 0px) scale(${transform.scale})`,
-          transformOrigin: '0 0'
+          transformOrigin: '0 0',
+          touchAction: 'none'
         }}
-        className="absolute top-0 left-0"
+        className="absolute top-0 left-0 touch-none"
       />
 
       {/* Visual Brush Cursor Ring & Precision Crosshair */}

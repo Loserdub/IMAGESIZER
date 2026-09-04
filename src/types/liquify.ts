@@ -1,4 +1,4 @@
-export type ToolMode = 'push' | 'pull' | 'vortex' | 'reconstruct' | 'freeze' | 'thaw' | 'pan';
+export type ToolMode = 'push' | 'swell' | 'pinch' | 'reconstruct' | 'freeze' | 'thaw' | 'pan';
 
 export interface BrushSettings {
   size: number; // in screen pixels
@@ -8,19 +8,16 @@ export interface BrushSettings {
   meshOverlay: boolean;
   meshGridSize: number; // e.g. 120
   meshOpacity: number; // 0.1 to 1.0
-  meshColor: string; // e.g. '#3b82f6'
+  meshColor: string; // e.g. '#10b981' or '#3b82f6'
   showMask: boolean; // toggle freeze mask overlay
   maskOpacity: number; // 0.1 to 1.0
   maskColor: string; // e.g. '#ef4444'
-  
-  // Fluid Physics Parameters
-  antiGravityIntensity: number; // 0.0 to 1.0
-  antiGravityDirection: number; // Angle in radians
-  fluidViscosity: number; // 0.0 to 1.0
-  densityDissipation: number; // 0.0 to 1.0
-  velocityDissipation: number; // 0.0 to 1.0
-  distortionStrength: number; // 0.0 to 2.0
-  pressureIterations: number; // Performance vs Quality
+
+  // Smart Background Guard (Dual-layer background lock)
+  backgroundGuard: boolean;
+  backgroundGuardFeather: number; // 1 to 16 pixels
+  showSubjectMaskPreview: boolean;
+  hasSubjectMask: boolean;
 }
 
 export interface ViewTransform {

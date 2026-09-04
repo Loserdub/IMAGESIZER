@@ -8,7 +8,9 @@ import {
   Download, 
   Upload, 
   Sliders,
-  RotateCcw
+  RotateCcw,
+  Scan,
+  ShieldCheck
 } from 'lucide-react';
 import { SampleImage } from '../types/liquify';
 
@@ -28,6 +30,11 @@ interface HeaderProps {
   onToggleMesh: () => void;
   onOpenExport: () => void;
   onToggleSidebar: () => void;
+  onAutoDetectBody?: () => void;
+  isDetectingBody?: boolean;
+  hasSubjectMask?: boolean;
+  backgroundGuard?: boolean;
+  onToggleBackgroundGuard?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,7 +52,12 @@ export const Header: React.FC<HeaderProps> = ({
   showMesh,
   onToggleMesh,
   onOpenExport,
-  onToggleSidebar
+  onToggleSidebar,
+  onAutoDetectBody,
+  isDetectingBody,
+  hasSubjectMask,
+  backgroundGuard,
+  onToggleBackgroundGuard
 }) => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -164,6 +176,34 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Mesh Toggle, Export, Sidebar */}
       <div className="flex items-center gap-1.5">
+        {/* Smart Background Guard / Body Detect Quick Button */}
+        {onAutoDetectBody && (
+          <button
+            onClick={onAutoDetectBody}
+            disabled={isDetectingBody}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+              backgroundGuard && hasSubjectMask
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                : 'bg-neutral-900 text-neutral-400 border-neutral-800 hover:bg-neutral-800 hover:text-neutral-200'
+            }`}
+            title={hasSubjectMask ? (backgroundGuard ? "Smart Background Guard Active (Click to re-detect)" : "Click to re-detect body") : "Auto-Detect Body & Lock Background"}
+          >
+            {isDetectingBody ? (
+              <>
+                <Scan className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                <span className="hidden sm:inline text-emerald-400">Detecting...</span>
+              </>
+            ) : (
+              <>
+                <ShieldCheck className={`w-3.5 h-3.5 ${backgroundGuard && hasSubjectMask ? 'text-emerald-400' : 'text-neutral-400'}`} />
+                <span className="hidden sm:inline">
+                  {hasSubjectMask ? (backgroundGuard ? 'Guard ON' : 'Guard OFF') : 'Detect Body'}
+                </span>
+              </>
+            )}
+          </button>
+        )}
+
         {/* Mesh Grid Overlay Toggle */}
         <button
           onClick={onToggleMesh}

@@ -8,6 +8,7 @@ import {
   Minimize2,
   Shield,
   ShieldOff,
+  ShieldCheck,
   Trash2
 } from 'lucide-react';
 import { ToolMode, BrushSettings } from '../types/liquify';
@@ -18,6 +19,8 @@ interface BottomControlBarProps {
   settings: BrushSettings;
   onUpdateSettings: (partial: Partial<BrushSettings>) => void;
   onClearMask?: () => void;
+  onAutoDetectBody?: () => void;
+  isDetectingBody?: boolean;
 }
 
 export const BottomControlBar: React.FC<BottomControlBarProps> = ({
@@ -25,13 +28,15 @@ export const BottomControlBar: React.FC<BottomControlBarProps> = ({
   onSelectTool,
   settings,
   onUpdateSettings,
-  onClearMask
+  onClearMask,
+  onAutoDetectBody,
+  isDetectingBody
 }) => {
   const tools: { id: ToolMode; label: string; icon: React.ReactNode; shortcut: string }[] = [
-    { id: 'push',        label: 'Blast',       icon: <Move className="w-4 h-4" />,       shortcut: '1' },
-    { id: 'pull',        label: 'Gravity',     icon: <Minimize2 className="w-4 h-4" />,  shortcut: '2' },
-    { id: 'vortex',      label: 'Vortex',      icon: <Sparkles className="w-4 h-4" />,   shortcut: '3' },
-    { id: 'reconstruct', label: 'Restore',     icon: <Maximize2 className="w-4 h-4" />,  shortcut: '4' },
+    { id: 'push',        label: 'Push',        icon: <Move className="w-4 h-4" />,       shortcut: '1' },
+    { id: 'swell',       label: 'Swell',       icon: <Maximize2 className="w-4 h-4" />,  shortcut: '2' },
+    { id: 'pinch',       label: 'Pinch',       icon: <Minimize2 className="w-4 h-4" />,  shortcut: '3' },
+    { id: 'reconstruct', label: 'Restore',     icon: <Sparkles className="w-4 h-4" />,   shortcut: '4' },
     { id: 'freeze',      label: 'Freeze',      icon: <Shield className="w-4 h-4" />,     shortcut: '6' },
     { id: 'thaw',        label: 'Thaw',        icon: <ShieldOff className="w-4 h-4" />,  shortcut: '7' },
     { id: 'pan',         label: 'Pan',         icon: <Hand className="w-4 h-4" />,       shortcut: '5' }
@@ -119,6 +124,33 @@ export const BottomControlBar: React.FC<BottomControlBarProps> = ({
                 <span className="hidden sm:inline">Clear Mask</span>
               </button>
             )}
+
+            {/* Smart Background Guard Toggle */}
+            <button
+              onClick={() => {
+                if (!settings.hasSubjectMask && onAutoDetectBody) {
+                  onAutoDetectBody();
+                } else {
+                  onUpdateSettings({ backgroundGuard: !settings.backgroundGuard });
+                }
+              }}
+              title={
+                settings.backgroundGuard
+                  ? 'Background Guard ON: Background lines & walls are locked straight'
+                  : 'Background Guard OFF: Click to lock background from warping'
+              }
+              className={`flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                settings.backgroundGuard
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                  : 'text-neutral-500 border-neutral-800/50 hover:bg-neutral-800/80 hover:text-neutral-300'
+              }`}
+            >
+              <ShieldCheck className={`w-3.5 h-3.5 ${settings.backgroundGuard ? 'text-emerald-400 animate-pulse' : 'text-neutral-500'}`} />
+              <span className="hidden sm:inline">Guard</span>
+              <span className={`text-[10px] font-mono ${settings.backgroundGuard ? 'text-emerald-300 font-bold' : 'opacity-70'}`}>
+                {isDetectingBody ? '...' : (settings.backgroundGuard ? 'ON' : 'OFF')}
+              </span>
+            </button>
 
             <button
               onClick={() => onUpdateSettings({ enableOffset: !settings.enableOffset })}
