@@ -225,12 +225,12 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
         return;
       }
       const mode = toolModeRef.current;
-      if (mode === 'swell' || mode === 'pinch' || mode === 'reconstruct' || mode === 'freeze' || mode === 'thaw') {
+      if (mode === 'swell' || mode === 'pinch' || mode === 'reconstruct' || mode === 'freeze' || mode === 'thaw' || mode === 'smooth') {
         const { screenX, screenY } = currentFocalPointRef.current;
         const s = settingsRef.current;
         const { normX, normY } = screenToNormImage(screenX, screenY);
         const normRadius = screenRadiusToNorm(s.size / 2);
-        // Continuous gentle rate per frame for controllable muscle inflation / contouring
+        // Continuous gentle rate per frame for controllable muscle inflation / contouring / wrinkle smoothing
         engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength * 0.25, mode);
       }
       holdRafIdRef.current = requestAnimationFrame(tick);
@@ -294,12 +294,13 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
 
     const mode = toolModeRef.current;
     if (mode !== 'pan' && engineRef.current) {
+      engineRef.current.beginStroke();
       engineRef.current.setInteracting(true);
       const { normX, normY }   = screenToNormImage(screenX, screenY);
       const normRadius         = screenRadiusToNorm(s.size / 2);
       engineRef.current.applyWarp(normX, normY, 0, 0, normRadius, s.strength, mode);
 
-      // Start continuous swelling/pinching/restoring while finger is pressed down
+      // Start continuous swelling/pinching/restoring/smoothing while finger is pressed down
       if (mode !== 'push') {
         startHoldLoop();
       }
@@ -386,6 +387,7 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
 
     const mode = toolModeRef.current;
     if (mode !== 'pan' && engineRef.current) {
+      engineRef.current.endStroke();
       engineRef.current.saveHistoryState();
       onHistoryChange();
     }
@@ -523,18 +525,26 @@ export const LiquifyCanvas: React.FC<LiquifyCanvasProps> = ({
             width:  `${settings.size}px`,
             height: `${settings.size}px`
           }}
-          className="pointer-events-none absolute top-0 left-0 rounded-full border border-emerald-400/60 bg-emerald-500/8 z-20 flex items-center justify-center transition-[width,height] duration-75"
+          className={`pointer-events-none absolute top-0 left-0 rounded-full border z-20 flex items-center justify-center transition-[width,height] duration-75 ${
+            toolMode === 'smooth'
+              ? 'border-cyan-400/80 bg-cyan-500/10 shadow-[0_0_15px_rgba(6,182,212,0.25)]'
+              : 'border-emerald-400/60 bg-emerald-500/8'
+          }`}
         >
           {/* Inner falloff pressure ring */}
           <div
             style={{ width: `${settings.size * 0.5}px`, height: `${settings.size * 0.5}px` }}
-            className="rounded-full border border-emerald-400/25 bg-emerald-400/5"
+            className={`rounded-full border ${
+              toolMode === 'smooth'
+                ? 'border-cyan-400/35 bg-cyan-400/10'
+                : 'border-emerald-400/25 bg-emerald-400/5'
+            }`}
           />
           {/* Precision crosshair guides */}
-          <div className="absolute w-full h-[1px] bg-emerald-400/20" />
-          <div className="absolute h-full w-[1px] bg-emerald-400/20" />
+          <div className={`absolute w-full h-[1px] ${toolMode === 'smooth' ? 'bg-cyan-400/30' : 'bg-emerald-400/20'}`} />
+          <div className={`absolute h-full w-[1px] ${toolMode === 'smooth' ? 'bg-cyan-400/30' : 'bg-emerald-400/20'}`} />
           {/* Center focal dot */}
-          <div className="w-1 h-1 bg-emerald-300 rounded-full absolute" />
+          <div className={`w-1 h-1 rounded-full absolute ${toolMode === 'smooth' ? 'bg-cyan-300' : 'bg-emerald-300'}`} />
         </div>
       )}
 

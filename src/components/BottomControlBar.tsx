@@ -9,7 +9,8 @@ import {
   Shield,
   ShieldOff,
   ShieldCheck,
-  Trash2
+  Trash2,
+  Droplet
 } from 'lucide-react';
 import { ToolMode, BrushSettings } from '../types/liquify';
 
@@ -36,10 +37,11 @@ export const BottomControlBar: React.FC<BottomControlBarProps> = ({
     { id: 'push',        label: 'Push',        icon: <Move className="w-4 h-4" />,       shortcut: '1' },
     { id: 'swell',       label: 'Swell',       icon: <Maximize2 className="w-4 h-4" />,  shortcut: '2' },
     { id: 'pinch',       label: 'Pinch',       icon: <Minimize2 className="w-4 h-4" />,  shortcut: '3' },
-    { id: 'reconstruct', label: 'Restore',     icon: <Sparkles className="w-4 h-4" />,   shortcut: '4' },
+    { id: 'smooth',      label: 'Smooth',      icon: <Droplet className="w-4 h-4" />,    shortcut: '4' },
+    { id: 'reconstruct', label: 'Restore',     icon: <Sparkles className="w-4 h-4" />,   shortcut: '5' },
     { id: 'freeze',      label: 'Freeze',      icon: <Shield className="w-4 h-4" />,     shortcut: '6' },
     { id: 'thaw',        label: 'Thaw',        icon: <ShieldOff className="w-4 h-4" />,  shortcut: '7' },
-    { id: 'pan',         label: 'Pan',         icon: <Hand className="w-4 h-4" />,       shortcut: '5' }
+    { id: 'pan',         label: 'Pan',         icon: <Hand className="w-4 h-4" />,       shortcut: '8' }
   ];
 
   return (
@@ -48,43 +50,85 @@ export const BottomControlBar: React.FC<BottomControlBarProps> = ({
 
         {/* Sliders Bar */}
         {toolMode !== 'pan' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 px-1">
-            {/* Brush Size */}
-            <div className="flex items-center gap-2.5 bg-neutral-900/80 px-3 py-1.5 rounded-lg border border-neutral-800/50">
-              <span className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider w-12 shrink-0">
-                Size
-              </span>
-              <input
-                type="range"
-                min="10"
-                max="300"
-                value={settings.size}
-                onChange={(e) => onUpdateSettings({ size: parseInt(e.target.value) })}
-                className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
-              />
-              <span className="text-[11px] font-mono text-emerald-400 w-10 text-right shrink-0">
-                {settings.size}px
-              </span>
+          <div className="space-y-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 px-1">
+              {/* Brush Size */}
+              <div className="flex items-center gap-2.5 bg-neutral-900/80 px-3 py-1.5 rounded-lg border border-neutral-800/50">
+                <span className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider w-12 shrink-0">
+                  Size
+                </span>
+                <input
+                  type="range"
+                  min="10"
+                  max="300"
+                  value={settings.size}
+                  onChange={(e) => onUpdateSettings({ size: parseInt(e.target.value) })}
+                  className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
+                />
+                <span className="text-[11px] font-mono text-emerald-400 w-10 text-right shrink-0">
+                  {settings.size}px
+                </span>
+              </div>
+
+              {/* Pressure / Strength */}
+              <div className="flex items-center gap-2.5 bg-neutral-900/80 px-3 py-1.5 rounded-lg border border-neutral-800/50">
+                <span className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider w-12 shrink-0">
+                  Force
+                </span>
+                <input
+                  type="range"
+                  min="0.05"
+                  max="1.0"
+                  step="0.05"
+                  value={settings.strength}
+                  onChange={(e) => onUpdateSettings({ strength: parseFloat(e.target.value) })}
+                  className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
+                />
+                <span className="text-[11px] font-mono text-emerald-400 w-10 text-right shrink-0">
+                  {Math.round(settings.strength * 100)}%
+                </span>
+              </div>
             </div>
 
-            {/* Pressure / Strength */}
-            <div className="flex items-center gap-2.5 bg-neutral-900/80 px-3 py-1.5 rounded-lg border border-neutral-800/50">
-              <span className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider w-12 shrink-0">
-                Force
-              </span>
-              <input
-                type="range"
-                min="0.05"
-                max="1.0"
-                step="0.05"
-                value={settings.strength}
-                onChange={(e) => onUpdateSettings({ strength: parseFloat(e.target.value) })}
-                className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
-              />
-              <span className="text-[11px] font-mono text-emerald-400 w-10 text-right shrink-0">
-                {Math.round(settings.strength * 100)}%
-              </span>
-            </div>
+            {/* When Smooth tool is selected, show Quick Mode Selector & Softness Slider */}
+            {toolMode === 'smooth' && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 bg-cyan-950/25 rounded-lg border border-cyan-800/35 text-xs animate-fade-in">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider pl-1">
+                    Target:
+                  </span>
+                  {(['skin', 'contour', 'hybrid'] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => onUpdateSettings({ smoothMode: m })}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
+                        (settings.smoothMode ?? 'skin') === m
+                          ? 'bg-cyan-500/25 text-cyan-200 border border-cyan-400/50 shadow-[0_0_8px_rgba(6,182,212,0.25)]'
+                          : 'text-neutral-400 hover:text-neutral-200 bg-neutral-900/60 border border-neutral-800'
+                      }`}
+                    >
+                      {m === 'skin' ? 'Skin & Wrinkles' : m === 'contour' ? 'Contour Mesh' : 'Hybrid (Both)'}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 pl-2 border-l border-cyan-900/40">
+                  <span className="text-[10px] text-neutral-400 whitespace-nowrap">Softness:</span>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={settings.smoothSoftness ?? 0.6}
+                    onChange={(e) => onUpdateSettings({ smoothSoftness: parseFloat(e.target.value) })}
+                    className="w-20 sm:w-28 h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
+                  />
+                  <span className="text-[10px] font-mono text-cyan-400 w-8 text-right">
+                    {Math.round((settings.smoothSoftness ?? 0.6) * 100)}%
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -94,6 +138,7 @@ export const BottomControlBar: React.FC<BottomControlBarProps> = ({
           <div className="flex items-center gap-1">
             {tools.map((t) => {
               const isSelected = toolMode === t.id;
+              const isSmooth = t.id === 'smooth';
               return (
                 <button
                   key={t.id}
@@ -101,7 +146,9 @@ export const BottomControlBar: React.FC<BottomControlBarProps> = ({
                   title={`${t.label} [${t.shortcut}]`}
                   className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer shrink-0 ${
                     isSelected
-                      ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40'
+                      ? isSmooth
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 shadow-[0_0_10px_rgba(6,182,212,0.25)]'
+                        : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40'
                       : 'text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800/80 border border-transparent'
                   }`}
                 >

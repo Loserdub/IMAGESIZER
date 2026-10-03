@@ -1,8 +1,18 @@
 import { ToolMode, BrushSettings, ExportSettings } from '../types/liquify';
 
+export interface TexturePatch {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  prevData: Uint8ClampedArray;
+  nextData: Uint8ClampedArray;
+}
+
 export interface HistorySnapshot {
   uvs: Float32Array;
   mask: Float32Array;
+  texturePatch?: TexturePatch;
 }
 
 export class LiquifyEngine {
@@ -10,11 +20,19 @@ export class LiquifyEngine {
   private gl: WebGLRenderingContext | WebGL2RenderingContext | null = null;
   public isWebGL2 = false;
 
-  // Source Image
-  private originalImage: HTMLImageElement | ImageBitmap | null = null;
+  // Source Image & Pixel/Texture Buffers
+  private originalImage: HTMLImageElement | ImageBitmap | HTMLCanvasElement | null = null;
   private imageWidth = 0;
   private imageHeight = 0;
   private imageTexture: WebGLTexture | null = null;
+  private originalTexture: WebGLTexture | null = null;
+  private workingCanvas: HTMLCanvasElement | null = null;
+  private workingCtx: CanvasRenderingContext2D | null = null;
+  private originalCanvas: HTMLCanvasElement | null = null;
+  private originalCtx: CanvasRenderingContext2D | null = null;
+  private prevStrokeCanvas: HTMLCanvasElement | null = null;
+  private prevStrokeCtx: CanvasRenderingContext2D | null = null;
+  private strokeDirtyBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
 
   // Smart Background Guard (Subject Mask)
   private subjectMaskTexture: WebGLTexture | null = null;
@@ -82,6 +100,8 @@ export class LiquifyEngine {
     showMask: true,
     maskOpacity: 0.35,
     maskColor: '#ef4444',
+    smoothMode: 'skin',
+    smoothSoftness: 0.6,
     backgroundGuard: false,
     backgroundGuardFeather: 4,
     showSubjectMaskPreview: false,
@@ -298,13 +318,31 @@ export class LiquifyEngine {
   // Image Loading & Mesh Setup
   // ---------------------------------------------------------------------------
 
-  public loadImage(image: HTMLImageElement | ImageBitmap, gridSize?: number) {
+  public loadImage(image: HTMLImageElement | ImageBitmap | HTMLCanvasElement, gridSize?: number) {
     const gl = this.gl;
     if (!gl) return;
 
     this.originalImage = image;
     this.imageWidth    = image.width;
     this.imageHeight   = image.height;
+
+    // Working & Original 2D Canvases for texture/pixel smoothing & restoration
+    this.workingCanvas = document.createElement('canvas');
+    this.workingCanvas.width = image.width;
+    this.workingCanvas.height = image.height;
+    this.workingCtx = this.workingCanvas.getContext('2d', { willReadFrequently: true });
+    this.workingCtx?.drawImage(image, 0, 0);
+
+    this.originalCanvas = document.createElement('canvas');
+    this.originalCanvas.width = image.width;
+    this.originalCanvas.height = image.height;
+    this.originalCtx = this.originalCanvas.getContext('2d', { willReadFrequently: true });
+    this.originalCtx?.drawImage(image, 0, 0);
+
+    this.prevStrokeCanvas = document.createElement('canvas');
+    this.prevStrokeCanvas.width = image.width;
+    this.prevStrokeCanvas.height = image.height;
+    this.prevStrokeCtx = this.prevStrokeCanvas.getContext('2d', { willReadFrequently: true });
 
     const baseGrid = gridSize ?? this.currentSettings.meshGridSize ?? 120;
     this.cols = Math.max(40, Math.min(240, baseGrid));
@@ -319,7 +357,18 @@ export class LiquifyEngine {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.workingCanvas);
+
+    if (this.originalTexture) {
+      gl.deleteTexture(this.originalTexture);
+    }
+    this.originalTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.originalTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.originalCanvas);
 
     this.subjectMaskCanvas = null;
     this.hasSubjectMask = false;
@@ -330,6 +379,7 @@ export class LiquifyEngine {
 
     this.history = [];
     this.historyIndex = -1;
+    this.strokeDirtyBox = null;
     this.saveHistoryState();
 
     this.render();
@@ -525,8 +575,295 @@ export class LiquifyEngine {
     this.render();
   }
 
-  public getImage(): HTMLImageElement | ImageBitmap | null {
-    return this.originalImage;
+  public getImage(): HTMLImageElement | ImageBitmap | HTMLCanvasElement | null {
+    return this.workingCanvas || this.originalImage;
+  }
+
+  public beginStroke() {
+    this.strokeDirtyBox = null;
+    if (this.workingCanvas && this.prevStrokeCtx) {
+      this.prevStrokeCtx.clearRect(0, 0, this.imageWidth, this.imageHeight);
+      this.prevStrokeCtx.drawImage(this.workingCanvas, 0, 0);
+    }
+  }
+
+  public endStroke() {
+    // Stroke completed
+  }
+
+  private sampleMaskWeightAt(u: number, v: number): number {
+    const c = Math.max(0, Math.min(this.cols, Math.round(u * this.cols)));
+    const r = Math.max(0, Math.min(this.rows, Math.round(v * this.rows)));
+    const idx = r * (this.cols + 1) + c;
+    return this.maskWeights[idx] || 0;
+  }
+
+  private relaxMeshTopology(
+    normX: number,
+    normY: number,
+    normRadius: number,
+    strength: number,
+    aspect: number
+  ): boolean {
+    const cols = this.cols;
+    const rows = this.rows;
+    const current = this.currentUVs;
+    const masks   = this.maskWeights;
+    const r2      = normRadius * normRadius;
+    let isModified = false;
+
+    const radiusX = normRadius / aspect;
+    const radiusY = normRadius;
+    const cMin = Math.max(1, Math.floor((normX - radiusX) * cols));
+    const cMax = Math.min(cols - 1, Math.ceil((normX + radiusX) * cols));
+    const rMin = Math.max(1, Math.floor((normY - radiusY) * rows));
+    const rMax = Math.min(rows - 1, Math.ceil((normY + radiusY) * rows));
+
+    const tempUVs = new Float32Array(current);
+
+    for (let r = rMin; r <= rMax; r++) {
+      for (let c = cMin; c <= cMax; c++) {
+        const vertexIndex = r * (cols + 1) + c;
+        const idx = vertexIndex * 2;
+
+        const u = current[idx];
+        const v = current[idx + 1];
+
+        const du = (u - normX) * aspect;
+        const dv = v - normY;
+        const dist2 = du * du + dv * dv;
+
+        if (dist2 < r2) {
+          const dist     = Math.sqrt(dist2);
+          const normDist = dist / normRadius;
+          const falloff  = (1.0 - normDist * normDist) * (1.0 - normDist * normDist);
+          const factor   = falloff * strength * 0.4;
+
+          const maskWeight = masks[vertexIndex];
+          if (maskWeight >= 0.999) continue;
+          const effectiveFactor = factor * (1.0 - maskWeight);
+
+          const leftIdx  = (r * (cols + 1) + (c - 1)) * 2;
+          const rightIdx = (r * (cols + 1) + (c + 1)) * 2;
+          const topIdx   = ((r - 1) * (cols + 1) + c) * 2;
+          const botIdx   = ((r + 1) * (cols + 1) + c) * 2;
+
+          const avgU = (tempUVs[leftIdx] + tempUVs[rightIdx] + tempUVs[topIdx] + tempUVs[botIdx]) * 0.25;
+          const avgV = (tempUVs[leftIdx + 1] + tempUVs[rightIdx + 1] + tempUVs[topIdx + 1] + tempUVs[botIdx + 1]) * 0.25;
+
+          current[idx]     += (avgU - u) * effectiveFactor;
+          current[idx + 1] += (avgV - v) * effectiveFactor;
+          isModified = true;
+        }
+      }
+    }
+
+    return isModified;
+  }
+
+  private applySmoothTexture(normX: number, normY: number, normRadius: number, strength: number) {
+    if (!this.workingCtx || !this.workingCanvas || !this.gl || !this.imageTexture) return;
+
+    const imgW = this.imageWidth;
+    const imgH = this.imageHeight;
+
+    const cx = normX * imgW;
+    const cy = normY * imgH;
+    const radiusPx = normRadius * imgH;
+    if (radiusPx < 1) return;
+
+    const x0 = Math.max(0, Math.floor(cx - radiusPx));
+    const y0 = Math.max(0, Math.floor(cy - radiusPx));
+    const x1 = Math.min(imgW, Math.ceil(cx + radiusPx));
+    const y1 = Math.min(imgH, Math.ceil(cy + radiusPx));
+    const boxW = x1 - x0;
+    const boxH = y1 - y0;
+    if (boxW <= 0 || boxH <= 0) return;
+
+    if (!this.strokeDirtyBox) {
+      this.strokeDirtyBox = { x0, y0, x1, y1 };
+    } else {
+      this.strokeDirtyBox.x0 = Math.min(this.strokeDirtyBox.x0, x0);
+      this.strokeDirtyBox.y0 = Math.min(this.strokeDirtyBox.y0, y0);
+      this.strokeDirtyBox.x1 = Math.max(this.strokeDirtyBox.x1, x1);
+      this.strokeDirtyBox.y1 = Math.max(this.strokeDirtyBox.y1, y1);
+    }
+
+    const srcImgData = this.workingCtx.getImageData(x0, y0, boxW, boxH);
+    const srcData = srcImgData.data;
+    const outData = new Uint8ClampedArray(srcData);
+
+    const r2 = radiusPx * radiusPx;
+
+    // Bilateral parameters for natural skin & wrinkle smoothing
+    const k = Math.max(2, Math.min(6, Math.round(radiusPx * 0.08)));
+    const spatialSigma = Math.max(1.5, k * 0.5);
+    const twoSpatialSigma2 = 2 * spatialSigma * spatialSigma;
+
+    const softness = this.currentSettings.smoothSoftness ?? 0.6;
+    const rangeSigma = 12 + softness * 45;
+    const twoRangeSigma2 = 2 * rangeSigma * rangeSigma;
+
+    const step = k > 4 ? 2 : 1;
+
+    for (let py = 0; py < boxH; py++) {
+      const worldY = y0 + py;
+      const dy = worldY - cy;
+      const dy2 = dy * dy;
+
+      for (let px = 0; px < boxW; px++) {
+        const worldX = x0 + px;
+        const dx = worldX - cx;
+        const dist2 = dx * dx + dy2;
+
+        if (dist2 >= r2) continue;
+
+        const dist = Math.sqrt(dist2);
+        const normDist = dist / radiusPx;
+        const falloff = (1.0 - normDist * normDist) * (1.0 - normDist * normDist);
+        const factor = falloff * strength * 0.85;
+
+        const normU = worldX / imgW;
+        const normV = worldY / imgH;
+        const maskWeight = this.sampleMaskWeightAt(normU, normV);
+        if (maskWeight >= 0.999) continue;
+        const effectiveFactor = factor * (1.0 - maskWeight);
+        if (effectiveFactor <= 0.005) continue;
+
+        const centerIdx = (py * boxW + px) * 4;
+        const cr = srcData[centerIdx];
+        const cg = srcData[centerIdx + 1];
+        const cb = srcData[centerIdx + 2];
+
+        let sumR = 0;
+        let sumG = 0;
+        let sumB = 0;
+        let totalW = 0;
+
+        for (let ky = -k; ky <= k; ky += step) {
+          const sampleY = py + ky;
+          if (sampleY < 0 || sampleY >= boxH) continue;
+          const sdy2 = ky * ky;
+
+          for (let kx = -k; kx <= k; kx += step) {
+            const sampleX = px + kx;
+            if (sampleX < 0 || sampleX >= boxW) continue;
+
+            const sdist2 = kx * kx + sdy2;
+            const sIdx = (sampleY * boxW + sampleX) * 4;
+            const sr = srcData[sIdx];
+            const sg = srcData[sIdx + 1];
+            const sb = srcData[sIdx + 2];
+
+            const dr = sr - cr;
+            const dg = sg - cg;
+            const db = sb - cb;
+            const colorDist2 = dr * dr + dg * dg + db * db;
+
+            const wSpatial = Math.exp(-sdist2 / twoSpatialSigma2);
+            const wRange   = Math.exp(-colorDist2 / twoRangeSigma2);
+            const w = wSpatial * wRange;
+
+            sumR += sr * w;
+            sumG += sg * w;
+            sumB += sb * w;
+            totalW += w;
+          }
+        }
+
+        if (totalW > 0.0001) {
+          const targetR = sumR / totalW;
+          const targetG = sumG / totalW;
+          const targetB = sumB / totalW;
+
+          outData[centerIdx]     = Math.round(cr + (targetR - cr) * effectiveFactor);
+          outData[centerIdx + 1] = Math.round(cg + (targetG - cg) * effectiveFactor);
+          outData[centerIdx + 2] = Math.round(cb + (targetB - cb) * effectiveFactor);
+        }
+      }
+    }
+
+    const outImgData = new ImageData(outData, boxW, boxH);
+    this.workingCtx.putImageData(outImgData, x0, y0);
+
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.imageTexture);
+    const rawBytes = new Uint8Array(outData.buffer, outData.byteOffset, outData.byteLength);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, boxW, boxH, gl.RGBA, gl.UNSIGNED_BYTE, rawBytes);
+  }
+
+  private applyRestoreTexture(normX: number, normY: number, normRadius: number, strength: number) {
+    if (!this.workingCtx || !this.originalCtx || !this.gl || !this.imageTexture) return;
+
+    const imgW = this.imageWidth;
+    const imgH = this.imageHeight;
+
+    const cx = normX * imgW;
+    const cy = normY * imgH;
+    const radiusPx = normRadius * imgH;
+    if (radiusPx < 1) return;
+
+    const x0 = Math.max(0, Math.floor(cx - radiusPx));
+    const y0 = Math.max(0, Math.floor(cy - radiusPx));
+    const x1 = Math.min(imgW, Math.ceil(cx + radiusPx));
+    const y1 = Math.min(imgH, Math.ceil(cy + radiusPx));
+    const boxW = x1 - x0;
+    const boxH = y1 - y0;
+    if (boxW <= 0 || boxH <= 0) return;
+
+    if (!this.strokeDirtyBox) {
+      this.strokeDirtyBox = { x0, y0, x1, y1 };
+    } else {
+      this.strokeDirtyBox.x0 = Math.min(this.strokeDirtyBox.x0, x0);
+      this.strokeDirtyBox.y0 = Math.min(this.strokeDirtyBox.y0, y0);
+      this.strokeDirtyBox.x1 = Math.max(this.strokeDirtyBox.x1, x1);
+      this.strokeDirtyBox.y1 = Math.max(this.strokeDirtyBox.y1, y1);
+    }
+
+    const curImgData = this.workingCtx.getImageData(x0, y0, boxW, boxH);
+    const origImgData = this.originalCtx.getImageData(x0, y0, boxW, boxH);
+    const cur = curImgData.data;
+    const orig = origImgData.data;
+
+    const r2 = radiusPx * radiusPx;
+
+    for (let py = 0; py < boxH; py++) {
+      const worldY = y0 + py;
+      const dy = worldY - cy;
+      const dy2 = dy * dy;
+
+      for (let px = 0; px < boxW; px++) {
+        const worldX = x0 + px;
+        const dx = worldX - cx;
+        const dist2 = dx * dx + dy2;
+        if (dist2 >= r2) continue;
+
+        const dist = Math.sqrt(dist2);
+        const normDist = dist / radiusPx;
+        const falloff = (1.0 - normDist * normDist) * (1.0 - normDist * normDist);
+        const factor = falloff * strength * 0.5;
+
+        const normU = worldX / imgW;
+        const normV = worldY / imgH;
+        const maskWeight = this.sampleMaskWeightAt(normU, normV);
+        if (maskWeight >= 0.999) continue;
+        const effectiveFactor = factor * (1.0 - maskWeight);
+
+        const idx = (py * boxW + px) * 4;
+        cur[idx]     = Math.round(cur[idx]     + (orig[idx]     - cur[idx])     * effectiveFactor);
+        cur[idx + 1] = Math.round(cur[idx + 1] + (orig[idx + 1] - cur[idx + 1]) * effectiveFactor);
+        cur[idx + 2] = Math.round(cur[idx + 2] + (orig[idx + 2] - cur[idx + 2]) * effectiveFactor);
+      }
+    }
+
+    this.workingCtx.putImageData(curImgData, x0, y0);
+
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.imageTexture);
+    const restoreBytes = new Uint8Array(cur.buffer, cur.byteOffset, cur.byteLength);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, boxW, boxH, gl.RGBA, gl.UNSIGNED_BYTE, restoreBytes);
   }
 
   // ---------------------------------------------------------------------------
@@ -545,6 +882,28 @@ export class LiquifyEngine {
   ) {
     if (!this.originalImage || mode === 'pan') return;
 
+    const aspect = this.imageWidth / this.imageHeight;
+
+    // Handle Smooth mode (Skin wrinkle smoothing and/or mesh contour relaxation)
+    if (mode === 'smooth') {
+      const smoothMode = this.currentSettings.smoothMode ?? 'skin';
+      if (smoothMode === 'skin' || smoothMode === 'hybrid') {
+        this.applySmoothTexture(normX, normY, normRadius, strength);
+      }
+      if (smoothMode === 'contour' || smoothMode === 'hybrid') {
+        if (this.relaxMeshTopology(normX, normY, normRadius, strength, aspect)) {
+          this.updateUVBuffer();
+        }
+      }
+      this.render();
+      return;
+    }
+
+    // Handle Reconstruct texture restoration alongside mesh restoration
+    if (mode === 'reconstruct') {
+      this.applyRestoreTexture(normX, normY, normRadius, strength);
+    }
+
     const cols = this.cols;
     const rows = this.rows;
     const current  = this.currentUVs;
@@ -553,7 +912,6 @@ export class LiquifyEngine {
     const r2       = normRadius * normRadius;
     if (r2 <= 0) return;
 
-    const aspect = this.imageWidth / this.imageHeight;
     let isMaskModified = false;
     let isUVModified   = false;
 
@@ -705,9 +1063,30 @@ export class LiquifyEngine {
       this.history = this.history.slice(0, this.historyIndex + 1);
     }
 
+    let texturePatch: TexturePatch | undefined = undefined;
+    if (this.strokeDirtyBox && this.prevStrokeCtx && this.workingCtx) {
+      const { x0, y0, x1, y1 } = this.strokeDirtyBox;
+      const w = x1 - x0;
+      const h = y1 - y0;
+      if (w > 0 && h > 0) {
+        const prevData = this.prevStrokeCtx.getImageData(x0, y0, w, h).data;
+        const nextData = this.workingCtx.getImageData(x0, y0, w, h).data;
+        texturePatch = {
+          x: x0,
+          y: y0,
+          width: w,
+          height: h,
+          prevData: new Uint8ClampedArray(prevData),
+          nextData: new Uint8ClampedArray(nextData)
+        };
+      }
+      this.strokeDirtyBox = null;
+    }
+
     this.history.push({
       uvs: new Float32Array(this.currentUVs),
-      mask: new Float32Array(this.maskWeights)
+      mask: new Float32Array(this.maskWeights),
+      texturePatch
     });
 
     if (this.history.length > this.maxHistory) {
@@ -727,6 +1106,17 @@ export class LiquifyEngine {
 
   public undo(): boolean {
     if (!this.canUndo()) return false;
+    const leavingState = this.history[this.historyIndex];
+    if (leavingState?.texturePatch && this.workingCtx && this.gl && this.imageTexture) {
+      const p = leavingState.texturePatch;
+      const imgData = new ImageData(new Uint8ClampedArray(p.prevData), p.width, p.height);
+      this.workingCtx.putImageData(imgData, p.x, p.y);
+      this.gl.activeTexture(this.gl.TEXTURE0);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.imageTexture);
+      const rawBytes = new Uint8Array(p.prevData.buffer, p.prevData.byteOffset, p.prevData.byteLength);
+      this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, p.x, p.y, p.width, p.height, this.gl.RGBA, this.gl.UNSIGNED_BYTE, rawBytes);
+    }
+
     this.historyIndex--;
     const state = this.history[this.historyIndex];
     this.currentUVs.set(state.uvs);
@@ -741,6 +1131,16 @@ export class LiquifyEngine {
     if (!this.canRedo()) return false;
     this.historyIndex++;
     const state = this.history[this.historyIndex];
+    if (state.texturePatch && this.workingCtx && this.gl && this.imageTexture) {
+      const p = state.texturePatch;
+      const imgData = new ImageData(new Uint8ClampedArray(p.nextData), p.width, p.height);
+      this.workingCtx.putImageData(imgData, p.x, p.y);
+      this.gl.activeTexture(this.gl.TEXTURE0);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.imageTexture);
+      const rawBytes = new Uint8Array(p.nextData.buffer, p.nextData.byteOffset, p.nextData.byteLength);
+      this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, p.x, p.y, p.width, p.height, this.gl.RGBA, this.gl.UNSIGNED_BYTE, rawBytes);
+    }
+
     this.currentUVs.set(state.uvs);
     this.maskWeights.set(state.mask);
     this.updateUVBuffer();
@@ -754,6 +1154,16 @@ export class LiquifyEngine {
     this.maskWeights.fill(0);
     this.updateUVBuffer();
     this.updateMaskBuffer();
+
+    if (this.originalCanvas && this.workingCtx && this.gl && this.imageTexture) {
+      this.strokeDirtyBox = { x0: 0, y0: 0, x1: this.imageWidth, y1: this.imageHeight };
+      this.workingCtx.clearRect(0, 0, this.imageWidth, this.imageHeight);
+      this.workingCtx.drawImage(this.originalCanvas, 0, 0);
+      this.gl.activeTexture(this.gl.TEXTURE0);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.imageTexture);
+      this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, this.workingCanvas!);
+    }
+
     this.saveHistoryState();
     this.render();
   }
@@ -788,8 +1198,9 @@ export class LiquifyEngine {
       gl.vertexAttribPointer(this.aBaseUVLoc, 2, gl.FLOAT, false, 0, 0);
     }
 
+    const activeTexture = (this.isComparing && this.originalTexture) ? this.originalTexture : this.imageTexture;
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.imageTexture);
+    gl.bindTexture(gl.TEXTURE_2D, activeTexture);
     gl.uniform1i(this.uImageLoc, 0);
 
     gl.activeTexture(gl.TEXTURE1);
@@ -889,7 +1300,8 @@ export class LiquifyEngine {
 
   public exportHighRes(settings: ExportSettings): Promise<Blob> {
     return new Promise((resolve, reject) => {
-      if (!this.originalImage) {
+      const sourceImage = this.workingCanvas || this.originalImage;
+      if (!sourceImage) {
         reject(new Error('No image loaded'));
         return;
       }
@@ -899,7 +1311,7 @@ export class LiquifyEngine {
       exportCanvas.height = this.imageHeight;
 
       const exportEngine = new LiquifyEngine(exportCanvas);
-      exportEngine.loadImage(this.originalImage, this.cols);
+      exportEngine.loadImage(sourceImage, this.cols);
 
       // Copy deformed UVs
       exportEngine.currentUVs.set(this.currentUVs);
@@ -942,9 +1354,17 @@ export class LiquifyEngine {
     this.deleteBuffer('wireframeIndexBuffer');
 
     if (this.imageTexture) gl.deleteTexture(this.imageTexture);
+    if (this.originalTexture) gl.deleteTexture(this.originalTexture);
     if (this.subjectMaskTexture) gl.deleteTexture(this.subjectMaskTexture);
     if (this.imageProgram) gl.deleteProgram(this.imageProgram);
     if (this.wireframeProgram) gl.deleteProgram(this.wireframeProgram);
     if (this.maskProgram) gl.deleteProgram(this.maskProgram);
+
+    this.workingCanvas = null;
+    this.workingCtx = null;
+    this.originalCanvas = null;
+    this.originalCtx = null;
+    this.prevStrokeCanvas = null;
+    this.prevStrokeCtx = null;
   }
 }

@@ -30,6 +30,8 @@ export default function App() {
     showMask: true,
     maskOpacity: 0.35,
     maskColor: '#ef4444',
+    smoothMode: 'skin',
+    smoothSoftness: 0.6,
     backgroundGuard: false,
     backgroundGuardFeather: 4,
     showSubjectMaskPreview: false,
@@ -180,13 +182,14 @@ export default function App() {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         handleRedo();
-      } else if (e.key === '1') setToolMode('push');
-      else if (e.key === '2') setToolMode('swell');
-      else if (e.key === '3') setToolMode('pinch');
-      else if (e.key === '4') setToolMode('reconstruct');
-      else if (e.key === '5') setToolMode('pan');
+      } else if (e.key === '1' || e.key.toLowerCase() === 'p') setToolMode('push');
+      else if (e.key === '2' || e.key.toLowerCase() === 'b') setToolMode('swell');
+      else if (e.key === '3' || e.key.toLowerCase() === 'c') setToolMode('pinch');
+      else if (e.key === '4' || e.key.toLowerCase() === 's') setToolMode('smooth');
+      else if (e.key === '5' || e.key.toLowerCase() === 'r') setToolMode('reconstruct');
       else if (e.key === '6') setToolMode('freeze');
       else if (e.key === '7') setToolMode('thaw');
+      else if (e.key === '8' || e.key.toLowerCase() === 'h') setToolMode('pan');
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {

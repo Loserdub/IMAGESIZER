@@ -20,11 +20,12 @@ Developed by **[Justin Ray](https://trustnodelogic.com)** (`jray` / `loserdub`) 
 
 ## 🚀 Core Features
 
-### 1. WebGL Liquify Brush Engine
+### 1. WebGL Liquify & Retouch Brush Engine
 - 🖐️ **Push / Drag Tool (Primary)**: Smoothly shifts target pixels in the direction of the swipe/drag stroke (ideal for pulling muscle contours, lats, and waistlines).
 - 🏋️ **Swell / Bloat Tool**: Expands pixels radially outward from the center of the brush (ideal for expanding biceps, deltoids, and glutes).
 - 🤏 **Pinch / Shrink Tool**: Pulls pixels radially inward toward the brush center (ideal for slimming waistlines and smoothing contours).
-- ✨ **Reconstruct / Eraser Tool**: Paints back over modified areas to restore the original un-distorted image coordinates.
+- 💧 **Smooth / Wrinkle Softener Tool**: Edge-preserving bilateral surface blur softens facial wrinkles (forehead lines, crow's feet, laugh lines, neck creases) and blemishes while keeping eyes, lips, and facial edges sharp. Also supports mesh contour relaxation.
+- ✨ **Reconstruct / Eraser Tool**: Paints back over modified areas to restore the original un-distorted coordinates and skin texture.
 - ⭕ **Smooth Radial Falloff**: Cosine/cubic polynomial falloff feathering prevents blocky or jagged edge artifacts.
 
 ### 2. Mobile Ergonomics & Precision Touch

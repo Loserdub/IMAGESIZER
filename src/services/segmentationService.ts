@@ -140,6 +140,7 @@ async function getMediaPipeSegmenter(): Promise<any> {
   try {
     // Dynamically load Tasks Vision from CDN with 4s timeout
     const visionModule = await Promise.race([
+      // @ts-ignore - CDN URL import
       import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/tasks-vision.js'),
       new Promise((_, reject) => setTimeout(() => reject(new Error('MediaPipe CDN timeout')), 4000))
     ]) as any;

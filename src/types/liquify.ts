@@ -1,4 +1,4 @@
-export type ToolMode = 'push' | 'swell' | 'pinch' | 'reconstruct' | 'freeze' | 'thaw' | 'pan';
+export type ToolMode = 'push' | 'swell' | 'pinch' | 'smooth' | 'reconstruct' | 'freeze' | 'thaw' | 'pan';
 
 export interface BrushSettings {
   size: number; // in screen pixels
@@ -12,6 +12,10 @@ export interface BrushSettings {
   showMask: boolean; // toggle freeze mask overlay
   maskOpacity: number; // 0.1 to 1.0
   maskColor: string; // e.g. '#ef4444'
+
+  // Smooth & Wrinkle Eraser settings
+  smoothMode: 'skin' | 'contour' | 'hybrid'; // skin = bilateral texture smoothing; contour = mesh relaxation; hybrid = both
+  smoothSoftness: number; // 0.1 to 1.0 (range threshold for bilateral edge preservation)
 
   // Smart Background Guard (Dual-layer background lock)
   backgroundGuard: boolean;

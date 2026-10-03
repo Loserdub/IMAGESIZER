@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { X, Sliders, Grid, Crosshair, Keyboard, Shield, ShieldCheck, Sparkles, Upload, Image as ImageIcon, Scan, Eye, Check } from 'lucide-react';
+import { X, Sliders, Grid, Crosshair, Keyboard, Shield, ShieldCheck, Sparkles, Upload, Image as ImageIcon, Scan, Eye, Check, Droplet } from 'lucide-react';
 import { BrushSettings, SampleImage } from '../types/liquify';
 
 interface SidebarControlsProps {
@@ -205,6 +205,62 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
           </div>
         </div>
 
+        {/* Skin Smoothing & Wrinkle Eraser */}
+        <div className="space-y-2">
+          <h3 className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5">
+            <Droplet className="w-3.5 h-3.5 text-cyan-400" />
+            Skin Smoothing & Wrinkles
+          </h3>
+          <div className="p-3 rounded-lg bg-neutral-900/60 border border-neutral-800/40 space-y-3">
+            {/* Smoothing Mode */}
+            <div className="space-y-1.5">
+              <span className="text-neutral-400 text-xs">Smoothing Mode</span>
+              <div className="grid grid-cols-3 gap-1">
+                {(['skin', 'contour', 'hybrid'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => onUpdateSettings({ smoothMode: m })}
+                    className={`px-1.5 py-1.5 rounded text-[10px] font-medium border text-center transition-all cursor-pointer ${
+                      (settings.smoothMode ?? 'skin') === m
+                        ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/50 shadow-[0_0_8px_rgba(6,182,212,0.25)]'
+                        : 'bg-neutral-950/60 text-neutral-400 border-neutral-800 hover:text-neutral-200'
+                    }`}
+                  >
+                    {m === 'skin' ? 'Skin Surface' : m === 'contour' ? 'Contour Mesh' : 'Hybrid Both'}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-neutral-500 leading-relaxed">
+                {(settings.smoothMode ?? 'skin') === 'skin'
+                  ? 'Edge-preserving bilateral filter blends skin wrinkles, blemishes & creases while keeping eyes & lips sharp.'
+                  : (settings.smoothMode ?? 'skin') === 'contour'
+                  ? 'Relaxes distorted mesh vertex coordinates to smooth jagged or bumpy warp curves.'
+                  : 'Softens skin wrinkles and relaxes warped mesh topology simultaneously.'}
+              </p>
+            </div>
+
+            {/* Wrinkle Softness / Blending Threshold */}
+            <div className="space-y-1 pt-1 border-t border-neutral-800/50">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-neutral-400">Wrinkle Softness</span>
+                <span className="font-mono text-cyan-400 text-[11px]">{Math.round((settings.smoothSoftness ?? 0.6) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.1"
+                max="1.0"
+                step="0.05"
+                value={settings.smoothSoftness ?? 0.6}
+                onChange={(e) => onUpdateSettings({ smoothSoftness: parseFloat(e.target.value) })}
+                className="w-full h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
+              />
+              <p className="text-[10px] text-neutral-500">
+                Higher = deeper blending of wrinkles & lines. Lower = subtle texture retention.
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Touch Ergonomics Section */}
         <div className="space-y-2">
           <h3 className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5">
@@ -283,10 +339,12 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
             Sculpting Tips
           </h3>
           <div className="p-3 rounded-lg bg-neutral-900/60 border border-neutral-800/40 text-xs space-y-2 text-neutral-400">
+            <p><strong className="text-cyan-300">Smooth (Wrinkle Eraser):</strong> Brush over forehead lines, crow's feet, neck folds, or blemishes to soften skin naturally.</p>
             <p><strong className="text-emerald-300">Swell (Bloat):</strong> Tap & hold or gently drag over biceps, shoulders, or curves to expand size outward.</p>
             <p><strong className="text-emerald-300">Push:</strong> Drag along muscle contours to shape and define curves smoothly.</p>
             <p><strong className="text-emerald-300">Pinch:</strong> Tap or drag over waists or contours to slim inward.</p>
-            <p><strong className="text-rose-400">Freeze Mask:</strong> Paint adjacent areas (torso, background) to lock them while editing muscles.</p>
+            <p><strong className="text-emerald-300">Restore:</strong> Gently paint over edited areas to bring back original skin texture or contours.</p>
+            <p><strong className="text-rose-400">Freeze Mask:</strong> Paint adjacent areas (eyes, jewelry, background) to lock them.</p>
           </div>
         </div>
 
@@ -304,10 +362,11 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
               ['Push Tool', '1'],
               ['Swell Tool (Bloat)', '2'],
               ['Pinch Tool (Slim)', '3'],
-              ['Restore / Eraser', '4'],
-              ['Pan Viewport', '5'],
+              ['Smooth / Wrinkles', '4 / S'],
+              ['Restore / Eraser', '5 / R'],
               ['Freeze Mask', '6'],
-              ['Thaw / Unmask', '7']
+              ['Thaw / Unmask', '7'],
+              ['Pan Viewport', '8 / H']
             ].map(([label, key]) => (
               <div key={label} className="flex justify-between">
                 <span className="text-neutral-500">{label}</span>
